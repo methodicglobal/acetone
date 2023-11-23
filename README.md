@@ -127,3 +127,31 @@ eg `no-cache` used as `https://mycoolservice.methodic.com/items?no-cache=true`
 
 ### Logging
 Logs are written to windows event log if `EnableLogging` is set to _True_
+
+
+
+### Example of URL rewrite rule
+`
+<rewrite>
+            <rules>
+                <rule name="ReverseProxyInboundRule1" stopProcessing="true">
+                    <match url="(.*)" />
+                    <conditions>
+                        <add input="{ACETONE:{CACHE_URL}}" pattern="(.+):\/\/(.+):(\d+)" />
+                    </conditions>
+                    <action type="Rewrite" url="{C:1}://{SERVER_NAME}:{C:3}{URL}" appendQueryString="true" logRewrittenUrl="true" />
+                </rule>
+            </rules>
+            <outboundRules>
+                <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1" enabled="true">
+                    <match filterByTags="A, Form, Img" serverVariable="RESPONSE_Location" pattern="https:\/\/([\w.]+)(:)(\d\d\d\d\d?)(.*)?" />
+                    <action type="Rewrite" value="https://{R:1}:443{R:4}" replace="true" />
+                </rule>
+                <preConditions>
+                    <preCondition name="ResponseIsHtml1">
+                        <add input="{RESPONSE_STATUS}" pattern="3\d\d" />
+                    </preCondition>
+                </preConditions>
+            </outboundRules>
+        </rewrite>
+`

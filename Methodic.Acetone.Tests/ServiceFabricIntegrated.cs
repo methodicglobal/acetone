@@ -18,7 +18,7 @@ namespace Methodic.Acetone.Tests
 		//TODO: Move these to settings?
 		private const string ClusterEndpoint = "LOCALHOST:19000";
 
-		private static readonly List<string> services = new List<string> { "service1", "service2", "service3", "service4", "service5", "service6", "service7", "service8", "service9", "service10" };
+		private static readonly List<string> services = new List<string> { "ServiceA", "ServiceB" };
 
 		//Single place to update security/connections
 		private static ServiceFabricUrlResolver CreateResolver(ILogger instanceLogger)
@@ -62,7 +62,7 @@ namespace Methodic.Acetone.Tests
 				int serviceIndex = random.Next(0, services.Count - 1);
 				Guid invocationId = Guid.NewGuid();
 				var serviceUri = await resolver.ResolveServiceUri(services[serviceIndex], invocationId);
-				Assert.IsTrue(serviceUri.ToUpperInvariant().Contains(Environment.MachineName.ToUpperInvariant()));
+				Assert.IsTrue(serviceUri.ToUpperInvariant().Contains(Environment.MachineName.ToUpperInvariant()) || serviceUri.Contains("127.0.0.1"));
 			}
 		}
 
@@ -75,7 +75,7 @@ namespace Methodic.Acetone.Tests
 				int serviceIndex = random.Next(0, services.Count - 1);
 				Guid invocationId = Guid.NewGuid();
 				var serviceUri = await resolver.ResolveServiceUri(services[serviceIndex], invocationId);
-				Assert.IsTrue(serviceUri.ToUpperInvariant().Contains(Environment.MachineName.ToUpperInvariant()));
+				Assert.IsTrue(serviceUri.ToUpperInvariant().Contains(Environment.MachineName.ToUpperInvariant()) || serviceUri.Contains("127.0.0.1"));
 			}
 		}
 
@@ -107,7 +107,8 @@ namespace Methodic.Acetone.Tests
 			{
 				{"ClusterConnectionStrings", ClusterEndpoint },
 				{"ApplicationNameLocation", "Subdomain" },
-				{"EnableLogging", "true" }
+				{"EnableLogging", "true" },
+				{"CredentialsType", "Local" }
 				//{"ServerCertificateThumbprints", "<server_cert_thumbprint>" },
 				//{"ClientCertificateThumbprint", "<client_cert_thumbprint>" }
 			};
@@ -154,7 +155,8 @@ namespace Methodic.Acetone.Tests
 			{
 				{"ClusterConnectionStrings", ClusterEndpoint },
 				{"ApplicationNameLocation", "Subdomain" },
-				{"EnableLogging", "true" }
+				{"EnableLogging", "true" },
+				{"CredentialsType", "Local" }
 				//{"ServerCertificateThumbprints", "<server_cert_thumbprint>" },
 				//{"ClientCertificateThumbprint", "<client_certcreds_thumbprint>" }
 			};

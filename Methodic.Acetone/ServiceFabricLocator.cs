@@ -324,10 +324,12 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry($"Final result returning is {result}, invocation {invocationId}", LogEntryType.Informational);
 			}
 
+			
+
+
+
 			stopwatch.Stop();
 			this.Logger.WriteEntry($"Time taken was {stopwatch.ElapsedMilliseconds} ms, invocation {invocationId}", LogEntryType.Informational);
-
-
 			return result;
 		}
 

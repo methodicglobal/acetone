@@ -34,8 +34,13 @@ namespace Methodic.Acetone.Tests
 			Assert.AreEqual("http://DEVMACHINE-BEAST:30006", endpoint, true);
 
 			addressObject = @"{""Endpoints"":{""RemotingListener"":""dev-ws-01.methodic.online:8899+26b10204-3f8c-47cd-bf2b-0932288a9701-132632828277101478-ce63d839-af7b-4952-8bb8-a4bc79633291-Secure""}}";
+			Assert.ThrowsException<System.Exception>(() =>
+			{
+				return ServiceFabricUrlResolver.EndpointJsonToText(addressObject, logger);
+			});
+			addressObject = @"	{""Endpoints"":{""HttpListener"":""https:\/\/0.0.0.0:20155"",""RemotingListener"":""timmyazdev:50239+e7814972-af49-4445-ac74-2e455c7d2076-133448859851162104-79bc2aa7-6ad1-40e2-a605-329d84b7bb3a-Secure""}}";
 			endpoint = ServiceFabricUrlResolver.EndpointJsonToText(addressObject, logger);
-			Assert.AreEqual("dev-ws-01.methodic.online:8899+26b10204-3f8c-47cd-bf2b-0932288a9701-132632828277101478-ce63d839-af7b-4952-8bb8-a4bc79633291-Secure", endpoint, true);
+			Assert.AreEqual("https://0.0.0.0:20155", endpoint, true);
 		}
 
 

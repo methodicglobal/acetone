@@ -1,5 +1,4 @@
-﻿using Newtonsoft.Json;
-
+﻿
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -76,8 +75,8 @@ namespace Methodic.Acetone
 			ServiceChangePollInterval = TimeSpan.FromSeconds(5)
 		};
 
-	//Convenience methods
-	public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString) : this(logger, new List<string> { clusterConnectionString }) 
+		//Convenience methods
+		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString) : this(logger, new List<string> { clusterConnectionString })
 		{ }
 
 		public ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionString)
@@ -176,7 +175,7 @@ namespace Methodic.Acetone
 			this.Client.ServiceManager.ServiceNotificationFilterMatched += this.ServiceManager_ServiceNotificationFilterMatched;
 			this.WarmupCache();
 
-			
+
 		}
 
 		private void ServiceManager_ServiceNotificationFilterMatched(object sender, EventArgs e)
@@ -193,7 +192,7 @@ namespace Methodic.Acetone
 			: this(logger, new List<string> { clusterConnectionString }, clientCertificateThumbprint, new List<string> { serverCertificateThumbprint }) { }
 
 		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, string clientCertificateThumbprint, List<string> serverCertificateThumbprints)
-			: this(logger, new List<string>{ clusterConnectionString}, clientCertificateThumbprint, serverCertificateThumbprints ) { }
+			: this(logger, new List<string> { clusterConnectionString }, clientCertificateThumbprint, serverCertificateThumbprints) { }
 
 		public ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionStrings, string clientCertificateThumbprint, List<string> serverCertificateThumbprints)
 		{
@@ -272,10 +271,10 @@ namespace Methodic.Acetone
 				if (refreshCache || !CachedApplications.Value.TryGetValue(cacheKey, out application))
 				{
 					//Can't use async/await inside of locks. Wait for the Task to complete
-					this.Logger.WriteEntry($"Cache for key {cacheKey} was not found, so we'll construct it", LogEntryType.Debug);		//Write out a diagnostic message for cache miss and rebuild
-					var applications = this.Client.QueryManager.GetApplicationListAsync().GetAwaiter().GetResult()?.ToList();			//Call the SF cluster and query the list of available applications
-					
-					
+					this.Logger.WriteEntry($"Cache for key {cacheKey} was not found, so we'll construct it", LogEntryType.Debug);       //Write out a diagnostic message for cache miss and rebuild
+					var applications = this.Client.QueryManager.GetApplicationListAsync().GetAwaiter().GetResult()?.ToList();           //Call the SF cluster and query the list of available applications
+
+
 					//If we didn't find any applications, then exit early by throwing an exception
 					if (applications == default || !applications.Any())
 					{
@@ -557,7 +556,7 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry(error, LogEntryType.Error);
 				throw new ArgumentNullException(nameof(service), error);
 			}
-			
+
 
 			this.Logger.WriteEntry($"Getting url for service {service.ServiceName}, invocation {invocationId}", LogEntryType.Informational);
 
@@ -583,14 +582,20 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry(error, LogEntryType.Error);
 				throw new Exception(error);
 			}
-			//For some reason, the address contains a JSON object, not sure why but this will deal with both scenarios
-			if (endpoint.Address.Contains('{')) //JSON Result on endpoint address?
-			{
-				return EndpointJsonToText(endpoint.Address, this.Logger);
-			}
 
+			string address = endpoint.Address;
+			//For some reason, the address contains a JSON object, not sure why but this will deal with both scenarios
+			if (address.Contains('{')) //JSON Result on endpoint address?
+			{
+				address = EndpointJsonToText(endpoint.Address, this.Logger);
+			}
+			if (address.Contains("0.0.0.0"))
+			{
+				this.Logger.WriteEntry("Result from Service Fabric contains a local IP address of 0.0.0.0 which is non-routable and will be replaced with loopback of 127.0.0.1", LogEntryType.Warning);
+				address = address.Replace("0.0.0.0", "127.0.0.1");
+			}
 			//If there are multiple, then just return the first(?)
-			return endpoint.Address;
+			return address;
 		}
 
 		public static string EndpointJsonToText(string json, ILogger logger)
@@ -613,19 +618,9 @@ namespace Methodic.Acetone
 			}
 			else
 			{
-				//Fallback to JSON deserialize
-				var endpoint = JsonConvert.DeserializeObject<EndpointAddressObject>(json);
-				string address = endpoint.Endpoints?.Values.FirstOrDefault(v =>
-				{
-					return !string.IsNullOrEmpty(v);
-				});
-				if (address == default)
-				{
-					string error = $"Found no endpoint for the application in {json}";
-					logger.WriteEntry(error, LogEntryType.Error);
-					throw new Exception(error);
-				}
-				return address;
+				string error = $"Found no endpoint for the application in {json}";
+				logger.WriteEntry(error, LogEntryType.Error);
+				throw new Exception(error);
 			}
 		}
 
@@ -646,21 +641,21 @@ namespace Methodic.Acetone
 				switch (nameLocation)
 				{
 					case ApplicationNameLocation.Subdomain:
-						applicationName = originalUri.Host.Split('.').First(); //expects service.uat.company.com
-						return true;
+					applicationName = originalUri.Host.Split('.').First(); //expects service.uat.company.com
+					return true;
 					case ApplicationNameLocation.SubdomainPreHyphens:
-						applicationName = originalUri.Host.Split('.').First().Split('-').First(); //expects service-uat-01.company.com
-						return true;
+					applicationName = originalUri.Host.Split('.').First().Split('-').First(); //expects service-uat-01.company.com
+					return true;
 					case ApplicationNameLocation.SubdomainPostHyphens:
-						applicationName = originalUri.Host.Split('.').First().Split('-').Last(); //expects uat-01-service.company.com
-						return true;
+					applicationName = originalUri.Host.Split('.').First().Split('-').Last(); //expects uat-01-service.company.com
+					return true;
 					case ApplicationNameLocation.FirstUrlFragment:
-						applicationName = originalUri.Segments.Length > 1 ? originalUri.Segments[1].Trim('/', '\\') : originalUri.AbsolutePath.Trim('/', '\\'); //expects connect.uat.copmany.com/service
-						return true;
+					applicationName = originalUri.Segments.Length > 1 ? originalUri.Segments[1].Trim('/', '\\') : originalUri.AbsolutePath.Trim('/', '\\'); //expects connect.uat.copmany.com/service
+					return true;
 
 					default:
-						applicationName = originalUri.Segments[1].Trim('/', '\\');
-						return true;
+					applicationName = originalUri.Segments[1].Trim('/', '\\');
+					return true;
 				}
 			}
 
