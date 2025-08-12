@@ -1,0 +1,74 @@
+name: Build & Release (.NET Framework 4.8)
+
+on:
+  push:
+    branches: [ main ]   # change if your default branch differs
+  workflow_dispatch: { }
+
+permissions:
+  contents: write   # needed to create tags/releases
+  actions: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      SOLUTION_FILE: Methodic.Acetone.sln
+      BUILD_CONFIGURATION: Release
+      ARTIFACT_NAME: acetone-output
+      ARTIFACT_ZIP: acetone-bin.zip
+
+    steps:
+      - name: Checkout (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore
+        run: nuget restore "$env:SOLUTION_FILE"
+
+      - name: Build (MSBuild)
+        run: msbuild "$env:SOLUTION_FILE" /p:Configuration=$env:BUILD_CONFIGURATION /m
+
+      # Package the main library output (adjust if you want tests or extras)
+      - name: Package build output
+        shell: pwsh
+        run: |
+          $out = Join-Path $env:RUNNER_TEMP $env:ARTIFACT_NAME
+          New-Item -Force -ItemType Directory -Path $out | Out-Null
+          # Primary project binaries
+          Copy-Item -Recurse -Force ".\Methodic.Acetone\bin\$env:BUILD_CONFIGURATION\*" $out
+          # If you want to include the Reference Assemblies folder in the zip, uncomment:
+          # Copy-Item -Recurse -Force ".\Reference Assemblies\Microsoft\IIS\*" (Join-Path $out "ReferenceAssemblies\Microsoft\IIS")
+          Compress-Archive -Path "$out\*" -DestinationPath "$env:ARTIFACT_ZIP" -Force
+
+      - name: Compute next integer tag (vN)
+        id: nexttag
+        shell: pwsh
+        run: |
+          git fetch --tags --force
+          $tags = (git tag --list "v*" | Where-Object { $_ -match '^v\d+$' }) | ForEach-Object { $_.Trim() }
+          if (-not $tags -or $tags.Count -eq 0) { $next = 1 }
+          else {
+            $max = ($tags | ForEach-Object { [int]($_ -replace '^v','') } | Measure-Object -Maximum).Maximum
+            $next = [int]$max + 1
+          }
+          "next=v$next" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.nexttag.outputs.next }}
+          name: Release ${{ steps.nexttag.outputs.next }}
+          body: |
+            Automated build from ${{ github.sha }} on branch ${{ github.ref_name }}.
+          files: |
+            ${{ env.ARTIFACT_ZIP }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
