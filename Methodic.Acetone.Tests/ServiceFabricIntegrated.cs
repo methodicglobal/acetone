@@ -49,7 +49,7 @@ namespace Methodic.Acetone.Tests
 			}
 			double averageTime = times.Average();
 			Console.WriteLine($"Cached {ServiceFabricUrlResolver.CachedApplicationCount} applications and {ServiceFabricUrlResolver.CachedServicesCount} services");
-			Console.WriteLine($"Average time for ResolveServuceUri is {averageTime} milliseconds across {times.Count} measured calls");
+			Console.WriteLine($"Average time for ResolveServiceUri is {averageTime} milliseconds across {times.Count} measured calls");
 			Assert.IsTrue(averageTime < 100, $"Expected ResolveServiceUri to average under 100 milliseconds per call over {times.Count} calls but was {averageTime} instead");
 		}
 

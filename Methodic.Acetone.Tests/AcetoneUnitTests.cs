@@ -34,7 +34,7 @@ namespace Methodic.Acetone.Tests
 			Assert.AreEqual("http://DEVMACHINE-BEAST:30006", endpoint, true);
 
 			addressObject = @"{""Endpoints"":{""RemotingListener"":""dev-ws-01.methodic.online:8899+26b10204-3f8c-47cd-bf2b-0932288a9701-132632828277101478-ce63d839-af7b-4952-8bb8-a4bc79633291-Secure""}}";
-			Assert.ThrowsException<System.Exception>(() =>
+			_ = Assert.ThrowsExactly<System.Exception>(() =>
 			{
 				return ServiceFabricUrlResolver.EndpointJsonToText(addressObject, logger);
 			});

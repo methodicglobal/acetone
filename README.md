@@ -1,157 +1,185 @@
-# Introduction to Acetone
+# Acetone – Detailed Technical Guide
 
-#### Background
+## Introduction
 
-**Methodic's Acetone** allows a service fabric cluster to run on dynamic ports and/or hostnames, without exposing the services directly. This enables access to all APIs over the same SSL/TLS port 443 and IP address, even though the services themselves are on an internal network, using various port numbers and over various hosts according to your service fabric cluster deployment.
+### Background
 
-Due to a lack of off-the-shelf solutions for service fabric reverse proxies, **Methodic** custom built one specifically for Methodic needs, and named it **Acetone**
+**Methodic's Acetone** is a reverse proxy integration module designed specifically to work with **Microsoft Service Fabric** clusters that run on **dynamic ports** and/or **dynamic hostnames**.  
+Its core purpose is to allow all services in a cluster to be accessed through **a single public SSL/TLS endpoint** (port 443) and IP address, **without directly exposing the internal services** or their randomly assigned ports.
 
-#### How it works
+Service Fabric does not provide an off-the-shelf IIS reverse proxy with dynamic routing based on cluster metadata, so Methodic built Acetone to solve this problem in a production-grade, reusable way.
 
-::: mermaid
+Acetone is used in scenarios such as:
+- Multi-tenant microservices clusters where services move between nodes and ports.
+- Single public API endpoint mapping to multiple Service Fabric apps.
+- Isolating internal cluster topology from external consumers.
+
+### How It Works
+
+```mermaid
 graph LR;
- EXT-->IIS[Methodic Acetone on IIS 443]
- IIS-->SF1(SF Stateless Reliable Service 80443);
- IIS-->SF2(SF Stateless Reliable Service 90443);
- IIS-->SF3(SF Stateless Reliable Service 70443);
- IIS-->SF4(SF Stateless Reliable Service 60443);
-:::
+    EXT[External Client] --> IIS[Methodic Acetone on IIS:443];
+    IIS --> SF1[SF Stateless Reliable Service:80443];
+    IIS --> SF2[SF Stateless Reliable Service:90443];
+    IIS --> SF3[SF Stateless Reliable Service:70443];
+    IIS --> SF4[SF Stateless Reliable Service:60443];
+```
 
-When the IIS process starts (`w3wp.exe`), the module is initialized at which point it determines the configuration and establishes a connection to the service fabric cluster.
+**Lifecycle:**
+1. IIS starts the `w3wp.exe` process.
+2. The Acetone module is loaded and reads its configuration from IIS and Web.config.
+3. Acetone connects to the Service Fabric cluster using X.509 certificate authentication.
+4. Incoming HTTP requests matching the configured IIS URL Rewrite rules trigger Acetone’s resolver.
+5. Acetone determines:
+   - Which Service Fabric application/service to target (based on host/subdomain/URL rules).
+   - The correct service endpoint host and port combination from the cluster naming service.
+6. IIS rewrites the request to that resolved internal endpoint.
+7. The client sees only the single external SSL endpoint.
 
-Upon each HTTP request that matches the rewrite rule criteria within IIS, Acetone's Rewrite function is then invoked. This will determine which micro-service is to be called according to the HTTP request (eg subdomain) and configuration (discussed later), connect to the service fabric cluster endpoint configured, determine a single endpoint host/port combination, and rewrite a request to that destination instead.
+---
 
-# Installation
-### Windows OS
-Install IIS
-Install IIS Rewrite Module
-Install IIS Application Request Routing Module
+## Installation
 
-### Acetone
-Copy over all DLLs to IIS server
-Install the Acetone DLL into the GAC
+### Prerequisites – Windows Server
+- **Install IIS** (`ServerManager` → `Add Roles and Features` → Web Server).
+- **Install IIS Rewrite Module** ([Microsoft Download](https://www.iis.net/downloads/microsoft/url-rewrite)).
+- **Install IIS Application Request Routing (ARR)** ([Download ARR](https://www.iis.net/downloads/microsoft/application-request-routing)).
 
-### IIS
-Open the URL Rewrite module on server level in IIS Manager
-Go to View Providers under Actions
-Select Add Provider
-Choose a name (eg `Acetone`) and select Methodic Acetone from Managed Type dropdown
-Press OK and continue reading for configuration
+### Deploying Acetone
+1. Copy all Acetone DLLs to the IIS server.
+2. Install the main `Methodic.Acetone.dll` into the **Global Assembly Cache (GAC)**:
+   ```powershell
+   gacutil /i Methodic.Acetone.dll
+   ```
 
-# Configuration
+### IIS Setup
+1. In IIS Manager, at **server level**, open the **URL Rewrite** module.
+2. Click **View Providers** → **Add Provider**.
+3. Name it (e.g. `Acetone`) and select **Methodic Acetone** from the *Managed Type* dropdown.
+4. Press **OK**.
+5. Proceed to configuration.
 
-## General
+---
 
-#### Cluster Connection String (`ClusterConnectionString`) (required)
-Connection string for the service fabric cluster to discover. Can be a comma-separated list for multiple endpoints
+## Configuration
 
-eg _https://my-cluster-ss-lb.methodic.com:66042_
+### General Settings
 
+#### Cluster Connection String (`ClusterConnectionString`) – **Required**
+The connection string for the Service Fabric cluster.  
+Can include multiple comma-separated endpoints for HA/failover.
 
-#### Application Name Location (`ApplicationNameLocation`) (default: `Subdomain`)
-One of the following options: `Subdomain`, `SubdomainPostHyphens`, `SubdomainPreHyphens` or `FirstUrlFragment`.
-Defaults to `Subdomain` if not supplied, or value cannot be parsed.
+Example:
+```
+https://my-cluster-ss-lb.methodic.com:66042
+```
 
-The name of the application/service (eg _mycoolservice_) is derived from:
+#### Application Name Location (`ApplicationNameLocation`) – Default: `Subdomain`
+Defines how the service name is extracted from the request:
 
-- `Subdomain` : the very subdomain eg https://_mycoolservice_.methodic.com
+- `Subdomain`: `https://mycoolservice.methodic.com`
+- `SubdomainPostHyphens`: `https://uat-mycoolservice.methodic.com`
+- `SubdomainPreHyphens`: `https://mycoolservice-uat.methodic.com`
+- `FirstUrlFragment`: `https://uat.methodic.com/mycoolservice`
 
-- `SubdomainPostHyphens` : the subdomain after the last hyphen, eg https://uat-_mycoolservice_.methodic.com
+If omitted or invalid → defaults to `Subdomain`.
 
-- `SubdomainPreHyphens` : the subdomain before the first hyphen, eg https://_mycoolservice_-uat.methodic.com
+#### Partition Cache Limit (`PartitionCacheLimit`) – Default: `5`
+Max number of cached partition endpoint entries.
 
-- `FirstUrlFragment` : the first URL segment eg https://uat.methodic.com/_mycoolservice_
+#### Log Information (`LogInformation`) – Default: `False`
+If `True`, logs informational messages to Windows Event Log.
 
-#### Partition Cache Limit (`PartitionCacheLimit`) (default: 5)
-The maximum number of cached location entries on the client
+---
 
-#### Log Information (`LogInformation`) (default: `False`)
-`True` or `False` for logging information messages into event log
+### Credentials (X.509 Certificates)
 
-## Credentials
+Only X.509 certificate-based auth is currently supported.
 
-You'll need to decide if you would like to use Thumbprints or Common Names for X509 security.
-> Note: Only X509 certificate based security is currently supported - Windows/Azure Active Directory is coming soon
+#### **Thumbprint-based**
+- `CredentialsType` = `CertificateThumbprint`
+- `ClientCertificateThumbprint` → Thumbprint in `LocalMachine.My` store.
+- `ServerCertificateThumbprint` → Thumbprint of Service Fabric cluster cert.
 
-## Credentials > Certificates via Thumbprints
+#### **Common Name-based**
+- `CredentialsType` = `CertificateCommonName`
+- `ClientCertificateSubjectDistinguishedName` = e.g. `CN=Methodic Global`
+- `ClientCertificateIssuerDistinguishedName` = Full issuer DN.
+- `ServerCertificateCommonNames` (optional) = Comma-separated CN list.
 
-To configure Methodic Acetone to use Thumbprints for X509 certificate credentials please set the following values
+---
 
-#### Credentials Type (`CredentialsType`) 
-Set to `CertificateThumbprint` within IIS
+### Future Features
+- `VersionParameter`: Query string key holding app version → used for version-specific routing.
+- `ClearCacheParameter`: Query string key to force cache refresh (diagnostics).
 
-#### Client Certificate Thumbprint (`ClientCertificateThumbprint`)
-Certificate thumbprint of the client certificate - certificate needs to be installed in `LocalMachine.My` and the IIS process must have permissions to read the private key
+---
 
-#### Server Certificate Thumbprint (`ServerCertificateThumbprint`)
-Certificate thumbprint of the certificate installed on the cluster as `ServerCertificate` -> see cluster manifest
-
-
-## Credentials > Certificate via Common Name 
-
-To configure Methodic Acetone to use Common Names for X509 certificate credentials please set the following values
-
-#### Credentials Type (`CredentialsType`) 
-Set to `CertificateCommonName` within IIS
-
-#### Client Certificate Subject Distinguished Name (`ClientCertificateSubjectDistinguishedName`)
-Certificate CN=User name for connecting to the cluster
-
-eg _CN=Methodic Global_
-
-#### Client Certificate Issuer Distinguished Name (`ClientCertificateIssuerDistinguishedName`)
-Certificate issuer distinguished name for connecting to the cluster. 
-
-eg _CN=Sectigo RSA Domain Validation Secure Server CA, O=Sectigo Limited, L=Salford, S=Greater Manchester, C=GB_
-
-#### Server/Remote Common Names (Optional, Comma Separated) (`ServerCertificateCommonNames`)
-Comma separated list of Common Names of the remote cluster certificate. 
-
-eg _CN=*.mycluster.prod.com,CN=*.mycluster.dr.com_
-
-
-## Future Use
-
-### (future release) Version Query String Parameter Name (`VersionParameter`) (optional)
-Name of query string parameter which contains the version number of the application to locate 
-
-eg `methodic-api-version` used as `https://mycoolservice.methodic.com/items?methodic-api-version=v1.2.3.4`
-
-### (future release) Clear Cache Query String Parameter Name (`ClearCacheParameter`) (optional)
-If the query string parameter parses as a True boolean then all cached entries for Service Fabric are ignored and gets the application and services information from the cluster once again. Slower operation and should only be used for diagnostics
-
-eg `no-cache` used as `https://mycoolservice.methodic.com/items?no-cache=true`
-
-
-# Maintenance
+## Maintenance
 
 ### Logging
-Logs are written to windows event log if `EnableLogging` is set to _True_
+If `LogInformation` is true, Acetone writes to **Windows Event Log** under its own source.
 
-
-
-### Example of URL rewrite rule
-`
+### Example IIS URL Rewrite Rule
+```xml
 <rewrite>
-            <rules>
-                <rule name="ReverseProxyInboundRule1" stopProcessing="true">
-                    <match url="(.*)" />
-                    <conditions>
-                        <add input="{ACETONE:{CACHE_URL}}" pattern="(.+):\/\/(.+):(\d+)" />
-                    </conditions>
-                    <action type="Rewrite" url="{C:1}://{SERVER_NAME}:{C:3}{URL}" appendQueryString="true" logRewrittenUrl="true" />
-                </rule>
-            </rules>
-            <outboundRules>
-                <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1" enabled="true">
-                    <match filterByTags="A, Form, Img" serverVariable="RESPONSE_Location" pattern="https:\/\/([\w.]+)(:)(\d\d\d\d\d?)(.*)?" />
-                    <action type="Rewrite" value="https://{R:1}:443{R:4}" replace="true" />
-                </rule>
-                <preConditions>
-                    <preCondition name="ResponseIsHtml1">
-                        <add input="{RESPONSE_STATUS}" pattern="3\d\d" />
-                    </preCondition>
-                </preConditions>
-            </outboundRules>
-        </rewrite>
-`
+  <rules>
+    <rule name="ReverseProxyInboundRule1" stopProcessing="true">
+      <match url="(.*)" />
+      <conditions>
+        <add input="{ACETONE:{CACHE_URL}}" pattern="(.+):\/\/(.+):(\d+)" />
+      </conditions>
+      <action type="Rewrite" url="{C:1}://{SERVER_NAME}:{C:3}{URL}" appendQueryString="true" logRewrittenUrl="true" />
+    </rule>
+  </rules>
+  <outboundRules>
+    <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1" enabled="true">
+      <match filterByTags="A, Form, Img" serverVariable="RESPONSE_Location" pattern="https:\/\/([\w.]+)(:)(\d\d\d\d\d?)(.*)?" />
+      <action type="Rewrite" value="https://{R:1}:443{R:4}" replace="true" />
+    </rule>
+    <preConditions>
+      <preCondition name="ResponseIsHtml1">
+        <add input="{RESPONSE_STATUS}" pattern="3\d\d" />
+      </preCondition>
+    </preConditions>
+  </outboundRules>
+</rewrite>
+```
+
+---
+
+## Example Scenarios
+
+### 1. Multi-environment routing
+- `uat-mycoolservice.methodic.com` → UAT instance
+- `prod-mycoolservice.methodic.com` → Production instance
+
+### 2. Partitioned services
+Partition-based routing based on Service Fabric partition key.
+
+### 3. Cache refresh
+Request with `?no-cache=true` bypasses endpoint cache.
+
+---
+
+## Troubleshooting
+
+| Problem | Likely Cause | Solution |
+|---------|--------------|----------|
+| Requests bypass Acetone | Rewrite rule misconfigured | Check `{ACETONE:{CACHE_URL}}` condition |
+| 500 Internal Server Error | Cert permissions issue | Ensure IIS AppPool user has private key access |
+| Cluster not found | Wrong connection string | Verify port, DNS, and firewall |
+| VersionParam ignored | Feature not yet implemented | Wait for future release |
+
+---
+
+## Building from Source
+```powershell
+nuget restore Methodic.Acetone.sln
+msbuild Methodic.Acetone.sln /p:Configuration=Release
+```
+
+---
+
+## License
+MIT License. See `LICENSE` file.
