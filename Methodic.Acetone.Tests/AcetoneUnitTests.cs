@@ -130,5 +130,63 @@ namespace Methodic.Acetone.Tests
 				Assert.AreEqual(serviceName, applicationName);
 			}
 		}
+
+		[TestMethod]
+		public void PullRequestApplicationNameResolution()
+		{
+			// Test subdomain mode with pull request URLs
+			List<(string url, string expectedAppName)> subdomainPRTests = new List<(string, string)>
+			{
+				("https://guard-12906.pav.meth.wtf", "Guard-PR12906"),
+				("https://api-1234.test.methodic.com/swagger", "Api-PR1234"),
+				("guard-999.methodic.online", "Guard-PR999"),
+				("https://service-42.dev.company.com:8443/health", "Service-PR42"),
+				("https://myapp-567890.staging.methodic.com/?version=latest", "Myapp-PR567890")
+			};
+
+			foreach (var (url, expectedAppName) in subdomainPRTests)
+			{
+				if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(url, ApplicationNameLocation.Subdomain, out string applicationName))
+				{
+					Assert.Fail($"Could not resolve application name from PR URL: {url}");
+				}
+				Assert.AreEqual(expectedAppName, applicationName, $"Failed for URL: {url}");
+			}
+
+			// Test first URL fragment mode with pull request URLs
+			List<(string url, string expectedAppName)> firstFragmentPRTests = new List<(string, string)>
+			{
+				("https://api.methodic.com/guard-12906", "Guard-PR12906"),
+				("http://localhost:8709/service-1234/health", "Service-PR1234"),
+				("https://gateway.company.com/myapp-999/api/v1", "Myapp-PR999")
+			};
+
+			foreach (var (url, expectedAppName) in firstFragmentPRTests)
+			{
+				if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(url, ApplicationNameLocation.FirstUrlFragment, out string applicationName))
+				{
+					Assert.Fail($"Could not resolve application name from PR URL: {url}");
+				}
+				Assert.AreEqual(expectedAppName, applicationName, $"Failed for URL: {url}");
+			}
+
+			// Test that regular URLs (without PR pattern) still work correctly
+			List<(string url, string expectedAppName)> regularTests = new List<(string, string)>
+			{
+				("https://guard.pav.meth.wtf", "guard"),
+				("https://my-service.methodic.com", "my-service"), // This has hyphen but no number, so not a PR
+				("https://api.methodic.com/myservice", "myservice")
+			};
+
+			foreach (var (url, expectedAppName) in regularTests)
+			{
+				ApplicationNameLocation mode = url.Contains("/myservice") ? ApplicationNameLocation.FirstUrlFragment : ApplicationNameLocation.Subdomain;
+				if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(url, mode, out string applicationName))
+				{
+					Assert.Fail($"Could not resolve application name from regular URL: {url}");
+				}
+				Assert.AreEqual(expectedAppName, applicationName, $"Failed for regular URL: {url}");
+			}
+		}
 	}
 }

@@ -165,6 +165,30 @@ namespace Methodic.Acetone.Tests
 			Assert.IsNotNull(redirectUrl);
 		}
 
+		[TestMethod]
+		public void CheckPullRequestUrlExtraction()
+		{
+			// Test that pull request URLs are correctly parsed
+			string prUrl = "https://guard-12906.pav.meth.wtf";
+			
+			if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(prUrl, ApplicationNameLocation.Subdomain, out string applicationName))
+			{
+				Assert.Fail("Could not resolve application name from PR URL");
+			}
+			
+			Assert.AreEqual("Guard-PR12906", applicationName, "Pull request URL should be transformed to Guard-PR12906");
+			
+			// Test that normal URLs still work
+			string normalUrl = "https://guard.pav.meth.wtf";
+			
+			if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(normalUrl, ApplicationNameLocation.Subdomain, out string normalAppName))
+			{
+				Assert.Fail("Could not resolve application name from normal URL");
+			}
+			
+			Assert.AreEqual("guard", normalAppName, "Normal URL should extract service name as-is");
+		}
+
 		public class FakeRewriteContext : IRewriteContext
 		{
 			public bool RewriteCacheEnabled { get; set; }

@@ -1,4 +1,5 @@
 ﻿
+
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -638,25 +639,50 @@ namespace Methodic.Acetone
 			}
 			if (Uri.TryCreate(url, UriKind.Absolute, out Uri originalUri))
 			{
+				string extractedName = string.Empty;
+				
 				switch (nameLocation)
 				{
 					case ApplicationNameLocation.Subdomain:
-					applicationName = originalUri.Host.Split('.').First(); //expects service.uat.company.com
-					return true;
+						extractedName = originalUri.Host.Split('.').First(); //expects service.uat.company.com
+						break;
 					case ApplicationNameLocation.SubdomainPreHyphens:
-					applicationName = originalUri.Host.Split('.').First().Split('-').First(); //expects service-uat-01.company.com
-					return true;
+						extractedName = originalUri.Host.Split('.').First().Split('-').First(); //expects service-uat-01.company.com
+						break;
 					case ApplicationNameLocation.SubdomainPostHyphens:
-					applicationName = originalUri.Host.Split('.').First().Split('-').Last(); //expects uat-01-service.company.com
-					return true;
+						extractedName = originalUri.Host.Split('.').First().Split('-').Last(); //expects uat-01-service.company.com
+						break;
 					case ApplicationNameLocation.FirstUrlFragment:
-					applicationName = originalUri.Segments.Length > 1 ? originalUri.Segments[1].Trim('/', '\\') : originalUri.AbsolutePath.Trim('/', '\\'); //expects connect.uat.copmany.com/service
-					return true;
-
+						extractedName = originalUri.Segments.Length > 1 ? originalUri.Segments[1].Trim('/', '\\') : originalUri.AbsolutePath.Trim('/', '\\'); //expects connect.uat.copmany.com/service
+						break;
 					default:
-					applicationName = originalUri.Segments[1].Trim('/', '\\');
-					return true;
+						extractedName = originalUri.Segments[1].Trim('/', '\\');
+						break;
 				}
+
+				// Check if this is a pull request URL pattern: {serviceName}-{pullRequestId}
+				// Only check for Subdomain and FirstUrlFragment modes as they are most likely to contain PR patterns
+				if ((nameLocation == ApplicationNameLocation.Subdomain || nameLocation == ApplicationNameLocation.FirstUrlFragment) && 
+					extractedName.Contains("-") && 
+					System.Text.RegularExpressions.Regex.IsMatch(extractedName, @"^(.+)-(\d+)$"))
+				{
+					var match = System.Text.RegularExpressions.Regex.Match(extractedName, @"^(.+)-(\d+)$");
+					if (match.Success)
+					{
+						string serviceName = match.Groups[1].Value;
+						string prNumber = match.Groups[2].Value;
+						
+						// Transform to Service Fabric application name format: {ServiceName}-PR{PullRequestId}
+						// Capitalize first letter of service name to match typical Service Fabric naming conventions
+						string capitalizedServiceName = char.ToUpper(serviceName[0]) + serviceName.Substring(1).ToLower();
+						applicationName = $"{capitalizedServiceName}-PR{prNumber}";
+						return true;
+					}
+				}
+
+				// For non-PR URLs, return the extracted name as-is
+				applicationName = extractedName;
+				return true;
 			}
 
 			//Supplied URL has no resolvable application name

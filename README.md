@@ -1,62 +1,27 @@
-# Acetone – Detailed Technical Guide
+# Methodic Acetone – Service Fabric URL Resolver for IIS
 
-## Introduction
-
-### Background
-
-**Methodic's Acetone** is a reverse proxy integration module designed specifically to work with **Microsoft Service Fabric** clusters that run on **dynamic ports** and/or **dynamic hostnames**.  
-Its core purpose is to allow all services in a cluster to be accessed through **a single public SSL/TLS endpoint** (port 443) and IP address, **without directly exposing the internal services** or their randomly assigned ports.
-
-Service Fabric does not provide an off-the-shelf IIS reverse proxy with dynamic routing based on cluster metadata, so Methodic built Acetone to solve this problem in a production-grade, reusable way.
-
-Acetone is used in scenarios such as:
-- Multi-tenant microservices clusters where services move between nodes and ports.
-- Single public API endpoint mapping to multiple Service Fabric apps.
-- Isolating internal cluster topology from external consumers.
-
-### How It Works
-
-```mermaid
-graph LR;
-    EXT[External Client] --> IIS[Methodic Acetone on IIS:443];
-    IIS --> SF1[SF Stateless Reliable Service:80443];
-    IIS --> SF2[SF Stateless Reliable Service:90443];
-    IIS --> SF3[SF Stateless Reliable Service:70443];
-    IIS --> SF4[SF Stateless Reliable Service:60443];
-```
-
-**Lifecycle:**
-1. IIS starts the `w3wp.exe` process.
-2. The Acetone module is loaded and reads its configuration from IIS and Web.config.
-3. Acetone connects to the Service Fabric cluster using X.509 certificate authentication.
-4. Incoming HTTP requests matching the configured IIS URL Rewrite rules trigger Acetone’s resolver.
-5. Acetone determines:
-   - Which Service Fabric application/service to target (based on host/subdomain/URL rules).
-   - The correct service endpoint host and port combination from the cluster naming service.
-6. IIS rewrites the request to that resolved internal endpoint.
-7. The client sees only the single external SSL endpoint.
+Acetone is a high-performance IIS Rewrite Provider that seamlessly routes HTTP requests to **Service Fabric** services without requiring hardcoded endpoints. It automatically discovers services, resolves partitions, and caches results for optimal performance.
 
 ---
 
-## Installation
+## Features
 
-### Prerequisites – Windows Server
-- **Install IIS** (`ServerManager` → `Add Roles and Features` → Web Server).
-- **Install IIS Rewrite Module** ([Microsoft Download](https://www.iis.net/downloads/microsoft/url-rewrite)).
-- **Install IIS Application Request Routing (ARR)** ([Download ARR](https://www.iis.net/downloads/microsoft/application-request-routing)).
+- **Automatic Service Discovery**: Query Service Fabric clusters to find running services
+- **Dynamic Endpoint Resolution**: Resolve partition endpoints dynamically
+- **Intelligent Caching**: Cache application and service metadata for performance
+- **Multiple Routing Modes**: Support various URL-to-service mapping strategies
+- **Pull Request Routing**: Automatically route PR-specific URLs to dedicated service instances
+- **Certificate Authentication**: Secure cluster communication with X.509 certificates
+- **High Performance**: Built-in caching and optimized for high-throughput scenarios
 
-### Deploying Acetone
-1. Copy all Acetone DLLs to the IIS server.
-2. Install the main `Methodic.Acetone.dll` into the **Global Assembly Cache (GAC)**:
-   ```powershell
-   gacutil /i Methodic.Acetone.dll
-   ```
+---
 
-### IIS Setup
-1. In IIS Manager, at **server level**, open the **URL Rewrite** module.
-2. Click **View Providers** → **Add Provider**.
-3. Name it (e.g. `Acetone`) and select **Methodic Acetone** from the *Managed Type* dropdown.
-4. Press **OK**.
+## Quick Start
+
+1. Install Acetone on your IIS server
+2. Configure Service Fabric cluster connection
+3. Set up certificate authentication
+4. Configure URL rewrite rules
 5. Proceed to configuration.
 
 ---
@@ -83,6 +48,12 @@ Defines how the service name is extracted from the request:
 - `FirstUrlFragment`: `https://uat.methodic.com/mycoolservice`
 
 If omitted or invalid → defaults to `Subdomain`.
+
+**Pull Request Routing**: When using `Subdomain` or `FirstUrlFragment` modes, URLs with the pattern `{serviceName}-{pullRequestId}` are automatically routed to Service Fabric applications named `{ServiceName}-PR{pullRequestId}`.
+
+Examples:
+- `https://guard-12906.pav.meth.wtf` → routes to `Guard-PR12906` application
+- `https://api.methodic.com/service-999` → routes to `Service-PR999` application
 
 #### Partition Cache Limit (`PartitionCacheLimit`) – Default: `5`
 Max number of cached partition endpoint entries.
@@ -112,6 +83,44 @@ Only X.509 certificate-based auth is currently supported.
 ### Future Features
 - `VersionParameter`: Query string key holding app version → used for version-specific routing.
 - `ClearCacheParameter`: Query string key to force cache refresh (diagnostics).
+
+---
+
+## Pull Request Routing
+
+Acetone automatically detects and routes pull request-specific URLs to dedicated Service Fabric application instances. This enables seamless testing of feature branches without manual configuration.
+
+### How It Works
+
+1. **URL Pattern Detection**: Automatically detects URLs matching `{serviceName}-{pullRequestId}`
+2. **Application Name Transformation**: Converts to Service Fabric application name `{ServiceName}-PR{pullRequestId}`
+3. **Automatic Routing**: Routes requests to the correct PR-specific application instance
+
+### Supported URL Formats
+
+| URL | Application Name | Description |
+|-----|------------------|-------------|
+| `https://guard-12906.pav.meth.wtf` | `Guard-PR12906` | Subdomain mode |
+| `https://api.methodic.com/guard-12906` | `Guard-PR12906` | FirstUrlFragment mode |
+| `https://service-999.dev.company.com` | `Service-PR999` | Any numeric PR ID |
+
+### Service Fabric Application Naming
+
+Deploy your PR-specific applications using the naming convention:
+```
+{ServiceName}-PR{PullRequestId}
+```
+
+Examples:
+- `Guard-PR12906`
+- `Api-PR1234` 
+- `MyService-PR999`
+
+### Error Handling
+
+- If a PR-specific application doesn't exist, Acetone throws a `KeyNotFoundException`
+- No fallback to production services ensures isolation
+- Regular URLs without PR patterns continue to work normally
 
 ---
 
@@ -154,10 +163,14 @@ If `LogInformation` is true, Acetone writes to **Windows Event Log** under its o
 - `uat-mycoolservice.methodic.com` → UAT instance
 - `prod-mycoolservice.methodic.com` → Production instance
 
-### 2. Partitioned services
+### 2. Pull Request routing
+- `mycoolservice-12906.methodic.com` → PR #12906 instance
+- `mycoolservice.methodic.com` → Production instance
+
+### 3. Partitioned services
 Partition-based routing based on Service Fabric partition key.
 
-### 3. Cache refresh
+### 4. Cache refresh
 Request with `?no-cache=true` bypasses endpoint cache.
 
 ---
@@ -169,6 +182,7 @@ Request with `?no-cache=true` bypasses endpoint cache.
 | Requests bypass Acetone | Rewrite rule misconfigured | Check `{ACETONE:{CACHE_URL}}` condition |
 | 500 Internal Server Error | Cert permissions issue | Ensure IIS AppPool user has private key access |
 | Cluster not found | Wrong connection string | Verify port, DNS, and firewall |
+| PR app not found | Application not deployed | Deploy Service Fabric app with correct naming: `{ServiceName}-PR{PRId}` |
 | VersionParam ignored | Feature not yet implemented | Wait for future release |
 
 ---
