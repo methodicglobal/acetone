@@ -14,7 +14,7 @@ Acetone is an IIS rewrite provider that discovers Service Fabric services on the
 - **Production-savvy caching** – warm and reuse cluster metadata (applications, services, partitions) for fast rewrites.
 - **Pull-request routing** – map URLs like `https://guard-12906.example.com` to the Service Fabric application `Guard-PR12906` automatically (first letter capitalised, rest lower-cased).
 - **IPv6 + normalization aware** – parses endpoints with IPv4, bracketed IPv6 (e.g. `https://[::1]:8080`), converts `0.0.0.0` → `127.0.0.1` and `[::]` → `[::1]` for local routability.
-- **Secure connectivity** – client thumbprint or common‑name + issuer Distinguished Name authentication, optional remote server validation.
+- **Secure connectivity** – client thumbprint or common-name + issuer Distinguished Name authentication, optional remote server validation.
 - **Robust error semantics** – distinct exceptions for null, empty, invalid URL inputs; clear diagnostics for missing cluster settings.
 - **Well tested** – extensive unit + mock integration suites; real cluster optional.
 
