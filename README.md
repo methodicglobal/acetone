@@ -77,7 +77,7 @@ Active in `Subdomain` & `FirstUrlFragment` modes. Pattern: `{serviceName}-{digit
 - Accepts plain HTTP/S URLs or JSON of the form: `{ "Endpoints": { "": "https://host:port" } }` or named keys like `HttpListener`.
 - Extracts the first HTTP/HTTPS endpoint, ignoring remoting endpoints.
 - Supports bracketed IPv6: `https://[2001:db8::1]:8443`.
-- Rewrites non‑routable addresses:
+- Rewrites non-routable addresses:
   - `0.0.0.0` → `127.0.0.1`
   - `[::]` → `[::1]`
 
