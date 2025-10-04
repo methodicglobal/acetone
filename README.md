@@ -70,7 +70,7 @@ Acetone is an IIS rewrite provider that discovers Service Fabric services on the
 
 ### Pull‑request aware routing
 
-Active in `Subdomain` & `FirstUrlFragment` modes. Pattern: `{serviceName}-{digits}` → `{ServiceName}-PR{digits}`. Only first character is capitalised; the rest lower‑cased (e.g. `API-1234` → `Api-PR1234`).
+Active in `Subdomain` & `FirstUrlFragment` modes. Pattern: `{serviceName}-{digits}` → `{ServiceName}-PR{digits}`. Only first character is capitalised; the rest lower-cased (e.g. `API-1234` → `Api-PR1234`).
 
 ### Endpoint parsing & normalization
 
