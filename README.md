@@ -1,199 +1,239 @@
 # Methodic Acetone – Service Fabric URL Resolver for IIS
 
-Acetone is a high-performance IIS Rewrite Provider that seamlessly routes HTTP requests to **Service Fabric** services without requiring hardcoded endpoints. It automatically discovers services, resolves partitions, and caches results for optimal performance.
+Acetone is an IIS rewrite provider that discovers Service Fabric services on the fly, resolves partitions, and caches endpoints so that applications never hard‑code cluster URLs. The core rewrite provider targets **.NET Framework 4.8.1** while the sample/stateless Service Fabric services in this repository target **.NET 9** to demonstrate modern hosting side‑by‑side.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![.NET Framework 4.8.1](https://img.shields.io/badge/.NET-4.8.1-blue.svg)](https://dotnet.microsoft.com/download/dotnet-framework)
+[![Service Fabric](https://img.shields.io/badge/Service%20Fabric-8.2.274-purple.svg)](https://learn.microsoft.com/azure/service-fabric/)
 
 ---
 
-## Features
+## Why Acetone?
 
-- **Automatic Service Discovery**: Query Service Fabric clusters to find running services
-- **Dynamic Endpoint Resolution**: Resolve partition endpoints dynamically
-- **Intelligent Caching**: Cache application and service metadata for performance
-- **Multiple Routing Modes**: Support various URL-to-service mapping strategies
-- **Pull Request Routing**: Automatically route PR-specific URLs to dedicated service instances
-- **Certificate Authentication**: Secure cluster communication with X.509 certificates
-- **High Performance**: Built-in caching and optimized for high-throughput scenarios
+- **Automatic discovery** – resolve Service Fabric applications / services and partitions with no manual wiring.
+- **Production-savvy caching** – warm and reuse cluster metadata (applications, services, partitions) for fast rewrites.
+- **Pull-request routing** – map URLs like `https://guard-12906.example.com` to the Service Fabric application `Guard-PR12906` automatically (first letter capitalised, rest lower‑cased).
+- **IPv6 + normalization aware** – parses endpoints with IPv4, bracketed IPv6 (e.g. `https://[::1]:8080`), converts `0.0.0.0` → `127.0.0.1` and `[::]` → `[::1]` for local routability.
+- **Secure connectivity** – client thumbprint or common‑name + issuer Distinguished Name authentication, optional remote server validation.
+- **Robust error semantics** – distinct exceptions for null, empty, invalid URL inputs; clear diagnostics for missing cluster settings.
+- **Well tested** – extensive unit + mock integration suites; real cluster optional.
 
 ---
 
 ## Quick Start
 
-1. Install Acetone on your IIS server
-2. Configure Service Fabric cluster connection
-3. Set up certificate authentication
-4. Configure URL rewrite rules
-5. Proceed to configuration.
+1. **Restore & build**
+   ```powershell
+   nuget restore acetone.sln
+   msbuild acetone.sln /p:Configuration=Release
+   ```
+2. **Copy** `Methodic.Acetone.dll` to the IIS server (e.g. into your site `bin`).
+3. **Configure** the provider in `web.config` (see minimal config below).
+4. **Deploy your SF apps** (e.g. `Guard`, `Guard-PR12906`).
+5. **Add a rewrite rule** that proxies to the resolved endpoint.
 
----
+### Minimal provider configuration
 
-## Configuration
-
-### General Settings
-
-#### Cluster Connection String (`ClusterConnectionString`) – **Required**
-The connection string for the Service Fabric cluster.  
-Can include multiple comma-separated endpoints for HA/failover.
-
-Example:
-```
-https://my-cluster-ss-lb.methodic.com:66042
-```
-
-#### Application Name Location (`ApplicationNameLocation`) – Default: `Subdomain`
-Defines how the service name is extracted from the request:
-
-- `Subdomain`: `https://mycoolservice.methodic.com`
-- `SubdomainPostHyphens`: `https://uat-mycoolservice.methodic.com`
-- `SubdomainPreHyphens`: `https://mycoolservice-uat.methodic.com`
-- `FirstUrlFragment`: `https://uat.methodic.com/mycoolservice`
-
-If omitted or invalid → defaults to `Subdomain`.
-
-**Pull Request Routing**: When using `Subdomain` or `FirstUrlFragment` modes, URLs with the pattern `{serviceName}-{pullRequestId}` are automatically routed to Service Fabric applications named `{ServiceName}-PR{pullRequestId}`.
-
-Examples:
-- `https://guard-12906.pav.meth.wtf` → routes to `Guard-PR12906` application
-- `https://api.methodic.com/service-999` → routes to `Service-PR999` application
-
-#### Partition Cache Limit (`PartitionCacheLimit`) – Default: `5`
-Max number of cached partition endpoint entries.
-
-#### Log Information (`LogInformation`) – Default: `False`
-If `True`, logs informational messages to Windows Event Log.
-
----
-
-### Credentials (X.509 Certificates)
-
-Only X.509 certificate-based auth is currently supported.
-
-#### **Thumbprint-based**
-- `CredentialsType` = `CertificateThumbprint`
-- `ClientCertificateThumbprint` → Thumbprint in `LocalMachine.My` store.
-- `ServerCertificateThumbprint` → Thumbprint of Service Fabric cluster cert.
-
-#### **Common Name-based**
-- `CredentialsType` = `CertificateCommonName`
-- `ClientCertificateSubjectDistinguishedName` = e.g. `CN=Methodic Global`
-- `ClientCertificateIssuerDistinguishedName` = Full issuer DN.
-- `ServerCertificateCommonNames` (optional) = Comma-separated CN list.
-
----
-
-### Future Features
-- `VersionParameter`: Query string key holding app version → used for version-specific routing.
-- `ClearCacheParameter`: Query string key to force cache refresh (diagnostics).
-
----
-
-## Pull Request Routing
-
-Acetone automatically detects and routes pull request-specific URLs to dedicated Service Fabric application instances. This enables seamless testing of feature branches without manual configuration.
-
-### How It Works
-
-1. **URL Pattern Detection**: Automatically detects URLs matching `{serviceName}-{pullRequestId}`
-2. **Application Name Transformation**: Converts to Service Fabric application name `{ServiceName}-PR{pullRequestId}`
-3. **Automatic Routing**: Routes requests to the correct PR-specific application instance
-
-### Supported URL Formats
-
-| URL | Application Name | Description |
-|-----|------------------|-------------|
-| `https://guard-12906.pav.meth.wtf` | `Guard-PR12906` | Subdomain mode |
-| `https://api.methodic.com/guard-12906` | `Guard-PR12906` | FirstUrlFragment mode |
-| `https://service-999.dev.company.com` | `Service-PR999` | Any numeric PR ID |
-
-### Service Fabric Application Naming
-
-Deploy your PR-specific applications using the naming convention:
-```
-{ServiceName}-PR{PullRequestId}
-```
-
-Examples:
-- `Guard-PR12906`
-- `Api-PR1234` 
-- `MyService-PR999`
-
-### Error Handling
-
-- If a PR-specific application doesn't exist, Acetone throws a `KeyNotFoundException`
-- No fallback to production services ensures isolation
-- Regular URLs without PR patterns continue to work normally
-
----
-
-## Maintenance
-
-### Logging
-If `LogInformation` is true, Acetone writes to **Windows Event Log** under its own source.
-
-### Example IIS URL Rewrite Rule
 ```xml
 <rewrite>
-  <rules>
-    <rule name="ReverseProxyInboundRule1" stopProcessing="true">
-      <match url="(.*)" />
-      <conditions>
-        <add input="{ACETONE:{CACHE_URL}}" pattern="(.+):\/\/(.+):(\d+)" />
-      </conditions>
-      <action type="Rewrite" url="{C:1}://{SERVER_NAME}:{C:3}{URL}" appendQueryString="true" logRewrittenUrl="true" />
-    </rule>
-  </rules>
-  <outboundRules>
-    <rule name="ReverseProxyOutboundRule1" preCondition="ResponseIsHtml1" enabled="true">
-      <match filterByTags="A, Form, Img" serverVariable="RESPONSE_Location" pattern="https:\/\/([\w.]+)(:)(\d\d\d\d\d?)(.*)?" />
-      <action type="Rewrite" value="https://{R:1}:443{R:4}" replace="true" />
-    </rule>
-    <preConditions>
-      <preCondition name="ResponseIsHtml1">
-        <add input="{RESPONSE_STATUS}" pattern="3\d\d" />
-      </preCondition>
-    </preConditions>
-  </outboundRules>
+  <providers>
+    <provider name="ServiceFabric" type="Methodic.Acetone.ServiceFabricLocator, Methodic.Acetone">
+      <settings>
+        <add key="ClusterConnectionStrings" value="localhost:19000" />
+        <add key="ApplicationNameLocation" value="Subdomain" />
+        <add key="EnableLogging" value="true" />
+        <add key="CredentialsType" value="Local" />
+      </settings>
+    </provider>
+  </providers>
 </rewrite>
 ```
 
 ---
 
-## Example Scenarios
+## Configuration Cheat Sheet
 
-### 1. Multi-environment routing
-- `uat-mycoolservice.methodic.com` → UAT instance
-- `prod-mycoolservice.methodic.com` → Production instance
+| Setting | Purpose | Notes |
+|---------|---------|-------|
+| `ClusterConnectionStrings` | One or more comma‑separated Service Fabric gateways. | REQUIRED; empty or whitespace rejected. Example: `node1:19000,node2:19000`. |
+| `ApplicationNameLocation` | Where to derive the application name. | `Subdomain` (default), `SubdomainPreHyphens`, `SubdomainPostHyphens`, `FirstUrlFragment`. |
+| `PartitionCacheLimit` | Fabric client partition location cache size. | Default `5` (set before client creation). |
+| `EnableLogging` | Emit informational + debug/ warning events. | Boolean; default `false`. |
+| `CredentialsType` | Cluster authentication mode. | `Local`, `CertificateThumbprint`, `CertificateCommonName`. |
+| `ClientCertificateThumbprint` | Local client cert thumbprint. | Required for `CertificateThumbprint`. Stored in `LocalMachine\My`. |
+| `ServerCertificateThumbprints` | Remote gateway/server cert thumbprints. | Optional extra validation (comma‑separated). |
+| `ClientCertificateSubjectDistinguishedName` | Client cert Subject DN. | Required for `CertificateCommonName`. |
+| `ClientCertificateIssuerDistinguishedName` | Client cert Issuer DN. | Required for `CertificateCommonName`. |
+| `ServerCertificateCommonNames` | Accepted remote common names (CN/SAN). | Optional; comma‑separated. |
+| `VersionParameter` | (Reserved) Version query string key. | Future feature. |
+| `ClearCacheParameter` | (Reserved) Cache-bypass query key. | Future feature. |
 
-### 2. Pull Request routing
-- `mycoolservice-12906.methodic.com` → PR #12906 instance
-- `mycoolservice.methodic.com` → Production instance
+### Pull‑request aware routing
 
-### 3. Partitioned services
-Partition-based routing based on Service Fabric partition key.
+Active in `Subdomain` & `FirstUrlFragment` modes. Pattern: `{serviceName}-{digits}` → `{ServiceName}-PR{digits}`. Only first character is capitalised; the rest lower‑cased (e.g. `API-1234` → `Api-PR1234`).
 
-### 4. Cache refresh
-Request with `?no-cache=true` bypasses endpoint cache.
+### Endpoint parsing & normalization
+
+- Accepts plain HTTP/S URLs or JSON of the form: `{ "Endpoints": { "": "https://host:port" } }` or named keys like `HttpListener`.
+- Extracts the first HTTP/HTTPS endpoint, ignoring remoting endpoints.
+- Supports bracketed IPv6: `https://[2001:db8::1]:8443`.
+- Rewrites non‑routable addresses:
+  - `0.0.0.0` → `127.0.0.1`
+  - `[::]` → `[::1]`
 
 ---
 
-## Troubleshooting
+## Example rewrite rule
 
-| Problem | Likely Cause | Solution |
-|---------|--------------|----------|
-| Requests bypass Acetone | Rewrite rule misconfigured | Check `{ACETONE:{CACHE_URL}}` condition |
-| 500 Internal Server Error | Cert permissions issue | Ensure IIS AppPool user has private key access |
-| Cluster not found | Wrong connection string | Verify port, DNS, and firewall |
-| PR app not found | Application not deployed | Deploy Service Fabric app with correct naming: `{ServiceName}-PR{PRId}` |
-| VersionParam ignored | Feature not yet implemented | Wait for future release |
+```xml
+<rewrite>
+  <rules>
+    <rule name="ReverseProxy" stopProcessing="true">
+      <match url="(.*)" />
+      <action type="Rewrite" url="{C:1}://{SERVER_NAME}:{C:3}{URL}" appendQueryString="true" />
+      <conditions>
+        <add input="{ACETONE:{CACHE_URL}}" pattern="(.+):\\/\\/(.+):(\d+)" />
+      </conditions>
+    </rule>
+  </rules>
+</rewrite>
+```
+
+(Adjust action target if you need host substitution or SSL offload.)
 
 ---
 
-## Building from Source
+## Caching Model
+
+| Cache | Scope | Backing Type | Invalidation | Notes |
+|-------|-------|--------------|--------------|-------|
+| Applications | Process | ConcurrentDictionary (lazy) | Manual additions / app lookups | Keyed by `APPNAME[-version]`. |
+| Services | Process | ConcurrentDictionary (lazy) | Service Fabric notifications | Service kind heuristic: first stateless *API* or *Service* name (or *FUNCTION* for function mode). |
+| Partitions | Process | ConcurrentDictionary | TTL (30s) or env var disable | TTL sliding window; disable with `ACETONE_DISABLE_PARTITION_CACHE=1`. |
+
+Warmup attempts to prime caches but fails gracefully if cluster not reachable.
+
+---
+
+## Testing & Verification
+
 ```powershell
-nuget restore Methodic.Acetone.sln
-msbuild Methodic.Acetone.sln /p:Configuration=Release
+# Default (unit + integration using mock cluster if real cluster absent)
+dotnet test
+
+# Unit only
+dotnet test --filter "TestCategory=Unit"
+
+# Integration (mock + real when cluster present)
+dotnet test --filter "TestCategory=Integration"
+```
+
+Environment variables:
+- `ACETONE_SKIP_DEPLOY=1` – Skip real cluster deployment (forces mock resolver).
+- `ACETONE_SKIP_APP_TYPE_UNPROVISION=1` – Preserve provisioned app types after tests.
+- `ACETONE_DISABLE_PARTITION_CACHE=1` – Bypass partition caching (diagnostics / perf stress).
+
+---
+
+## Development Workflow
+
+- Restore: `nuget restore acetone.sln`
+- Build (Debug): `msbuild acetone.sln /p:Configuration=Debug`
+- Test: `dotnet test`
+- Explore logs: enable `EnableLogging=true` in provider settings.
+
+---
+
+## Architecture Snapshot
+
+- `ServiceFabricUrlParser` – URL → application name / endpoint extraction.
+- `ServiceFabricUrlResolver` – cluster querying, caches, partition resolution.
+- `ServiceFabricLocator` – IIS rewrite provider entrypoint & validation.
+- `MockServiceFabricUrlResolver` / `TestableServiceFabricUrlResolver` – deterministic in‑memory test doubles.
+- `ServiceFabricTestClusterManager` – optional local cluster orchestration for integration tests.
+
+---
+
+## Example Usage
+
+```csharp
+using Methodic.Acetone;
+
+var logger = new TraceLogger { Enabled = true };
+using var resolver = new ServiceFabricUrlResolver(logger, "localhost:19000");
+
+if (ServiceFabricUrlParser.TryGetApplicationNameFromUrl(
+        "https://guard-12906.example.com",
+        ApplicationNameLocation.Subdomain,
+        out var appName))
+{
+    var endpoint = await resolver.ResolveServiceUri(appName, Guid.NewGuid());
+    Console.WriteLine($"Resolved endpoint: {endpoint}");
+}
 ```
 
 ---
 
+## Reference Guide
+
+### URL Parsing Modes
+
+| Mode | Example | Extracted |
+|------|---------|-----------|
+| Subdomain | `https://myservice.company.com` | `myservice` |
+| SubdomainPreHyphens | `https://myservice-uat-01.company.com` | `myservice` |
+| SubdomainPostHyphens | `https://uat-01-myservice.company.com` | `myservice` |
+| FirstUrlFragment | `https://api.company.com/myservice/v1` | `myservice` |
+
+### Pull Request Pattern Examples
+
+| Input Portion | Output | Notes |
+|---------------|--------|-------|
+| `guard-12906` | `Guard-PR12906` | Only first char capitalised |
+| `API-1234` | `Api-PR1234` | Rest lower‑cased |
+| `service-999` | `Service-PR999` | Any length digits |
+| `my-service` | `my-service` | Not PR (no terminal digits) |
+
+### Error Semantics
+
+| Scenario | Exception |
+|----------|-----------|
+| Rewrite null URL | `ArgumentNullException` |
+| Rewrite empty / whitespace URL | `ArgumentException` |
+| Invalid single label (e.g. `foo`) | `ArgumentException` |
+| Unresolvable application (valid pattern but not deployed) | `KeyNotFoundException` |
+
+### Performance Tips
+
+1. Reuse a single resolver instance per worker process.
+2. Place lowest‑latency gateway first in `ClusterConnectionStrings`.
+3. Increase `PartitionCacheLimit` only if you observe churn > limit.
+4. Leave `EnableLogging=false` in steady state; enable temporarily for diagnostics.
+5. Warm critical application names on startup (first resolution primes all caches).
+
+### Common Issues
+
+| Symptom | Likely Cause | Action |
+|---------|--------------|--------|
+| `ArgumentException` on rewrite | Empty / malformed incoming URL | Validate rewrite rule substitution variables. |
+| `KeyNotFoundException` resolving | App not deployed or wrong name | Check SF Explorer; confirm naming pattern. |
+| Endpoint shows `0.0.0.0` | Non‑routable binding | Automatically normalized to `127.0.0.1`. |
+| Endpoint shows `[::]` | IPv6 any binding | Normalized to `[::1]`. |
+| PR URL not mapping | Naming mismatch | Ensure `{Service}-PR{id}` app exists (capitalisation ignored). |
+| Cert auth fails | Cert not in store or ACL | Verify certificate in `LocalMachine\My` & private key access. |
+
+---
+
+## Contributing
+
+1. Run unit + integration tests before PR.
+2. Add tests for new parsing / caching / error logic.
+3. Keep documentation (README + comments) updated.
+4. Prefer minimal allocations & thread‑safe code paths.
+5. Follow existing logging patterns.
+
+---
+
 ## License
-MIT License. See `LICENSE` file.
+
+Acetone is released under the [MIT License](LICENSE).
