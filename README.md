@@ -1,6 +1,6 @@
 # Methodic Acetone – Service Fabric URL Resolver for IIS
 
-Acetone is an IIS rewrite provider that discovers Service Fabric services on the fly, resolves partitions, and caches endpoints so that applications never hard‑code cluster URLs. The core rewrite provider targets **.NET Framework 4.8.1** while the sample/stateless Service Fabric services in this repository target **.NET 9** to demonstrate modern hosting side‑by‑side.
+Acetone is an IIS rewrite provider that discovers Service Fabric services on the fly, resolves partitions, and caches endpoints so that applications never hard-code cluster URLs. The core rewrite provider targets **.NET Framework 4.8.1** while the sample/stateless Service Fabric services in this repository target **.NET 9** to demonstrate modern hosting side-by-side.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET Framework 4.8.1](https://img.shields.io/badge/.NET-4.8.1-blue.svg)](https://dotnet.microsoft.com/download/dotnet-framework)
