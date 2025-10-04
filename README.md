@@ -55,16 +55,16 @@ Acetone is an IIS rewrite provider that discovers Service Fabric services on the
 
 | Setting | Purpose | Notes |
 |---------|---------|-------|
-| `ClusterConnectionStrings` | One or more comma‑separated Service Fabric gateways. | REQUIRED; empty or whitespace rejected. Example: `node1:19000,node2:19000`. |
+| `ClusterConnectionStrings` | One or more comma-separated Service Fabric gateways. | REQUIRED; empty or whitespace rejected. Example: `node1:19000,node2:19000`. |
 | `ApplicationNameLocation` | Where to derive the application name. | `Subdomain` (default), `SubdomainPreHyphens`, `SubdomainPostHyphens`, `FirstUrlFragment`. |
 | `PartitionCacheLimit` | Fabric client partition location cache size. | Default `5` (set before client creation). |
 | `EnableLogging` | Emit informational + debug/ warning events. | Boolean; default `false`. |
 | `CredentialsType` | Cluster authentication mode. | `Local`, `CertificateThumbprint`, `CertificateCommonName`. |
 | `ClientCertificateThumbprint` | Local client cert thumbprint. | Required for `CertificateThumbprint`. Stored in `LocalMachine\My`. |
-| `ServerCertificateThumbprints` | Remote gateway/server cert thumbprints. | Optional extra validation (comma‑separated). |
+| `ServerCertificateThumbprints` | Remote gateway/server cert thumbprints. | Optional extra validation (comma-separated). |
 | `ClientCertificateSubjectDistinguishedName` | Client cert Subject DN. | Required for `CertificateCommonName`. |
 | `ClientCertificateIssuerDistinguishedName` | Client cert Issuer DN. | Required for `CertificateCommonName`. |
-| `ServerCertificateCommonNames` | Accepted remote common names (CN/SAN). | Optional; comma‑separated. |
+| `ServerCertificateCommonNames` | Accepted remote common names (CN/SAN). | Optional; comma-separated. |
 | `VersionParameter` | (Reserved) Version query string key. | Future feature. |
 | `ClearCacheParameter` | (Reserved) Cache-bypass query key. | Future feature. |
 
