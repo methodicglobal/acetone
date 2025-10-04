@@ -50,17 +50,21 @@ namespace Methodic.Acetone
 		{ get; set; } = ApplicationNameLocation.Subdomain;
 		public ILogger Logger { get; }
 
-		public ServiceFabricLocator(ILogger logger)
-		{
-			this.Logger = logger;
-		}
+	public ServiceFabricLocator(ILogger logger)
+	{
+		this.Logger = logger;
+	}
 
-		public ServiceFabricLocator()
-		{
-			this.Logger = new EventLogger(EventLogName, false);
-		}
+	public ServiceFabricLocator(ILogger logger, IServiceUrlResolver serviceUrlResolver)
+	{
+		this.Logger = logger;
+		this.ServiceUrlResolver = serviceUrlResolver;
+	}
 
-		public IEnumerable<SettingDescriptor> GetSettings()
+	public ServiceFabricLocator()
+	{
+		this.Logger = new EventLogger(EventLogName, false);
+	}		public IEnumerable<SettingDescriptor> GetSettings()
 		{
 			var settings = new List<SettingDescriptor>
 			{
@@ -111,14 +115,29 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry(error, LogEntryType.Error, 0422);
 				throw new ArgumentException(error, "ClusterConnectionStrings");
 			}
+			// New validation: treat empty or whitespace (or entries that resolve to zero endpoints) as invalid
+			if (string.IsNullOrWhiteSpace(clusterConnectionString))
+			{
+				string error = "ClusterConnectionStrings was provided but is empty or whitespace. At least one endpoint is required (eg node1:19000)";
+				this.Logger.WriteEntry(error, LogEntryType.Error, 0423);
+				throw new ArgumentException(error, "ClusterConnectionStrings");
+			}
+
 			this.ClusterConnectionStrings = clusterConnectionString?.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries)?.Select(a =>
 			{
-				if (!string.IsNullOrEmpty(a))
+				if (!string.IsNullOrWhiteSpace(a))
 				{
 					return a.Trim();
 				}
 				return null;
-			})?.ToList();
+			})?.Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+
+			if (this.ClusterConnectionStrings == null || this.ClusterConnectionStrings.Count == 0)
+			{
+				string error = "ClusterConnectionStrings contains no usable endpoints after parsing. Provide at least one non-empty entry.";
+				this.Logger.WriteEntry(error, LogEntryType.Error, 0424);
+				throw new ArgumentException(error, "ClusterConnectionStrings");
+			}
 
 			if (settings.TryGetValue("CredentialsType", out string credentialsType))
 			{
@@ -254,21 +273,29 @@ namespace Methodic.Acetone
 
 			try
 			{
-				//Construct the SF URL resolver and write info event with configuration details
-				switch (this.CredentialsType)
+				// Skip creating a resolver if one was already provided via constructor
+				if (this.ServiceUrlResolver == null)
 				{
-					default:
-					case CredentialsType.CertificateThumbprint:
-						this.Logger.WriteEntry($"Acetone configured with the following values - Cluster Connection String: {(this.ClusterConnectionStrings == null ? "NULL" : string.Join(", ", this.ClusterConnectionStrings)) }, Credentials Type: {this.CredentialsType}, Client Certificate Thumbprint: {this.ClientCertificateThumbprint}, Server Certificate Thumbprint: {(this.ServerCertificateThumbprints == null ? "NULL" : string.Join(", ", this.ServerCertificateThumbprints))}, Application Name Location: {this.ApplicationNameLocation}, Log Information: {this.Logger.Enabled}, Version Query String Parameter Name: {this.VersionParameter}, Clear Cache Query String Parameter Name: {this.ClearCacheParameter}, Service Fabric Client Partition Cache Limit: {ServiceFabricUrlResolver.Settings.PartitionLocationCacheLimit}", LogEntryType.Informational);
+					//Construct the SF URL resolver and write info event with configuration details
+					switch (this.CredentialsType)
+					{
+						default:
+						case CredentialsType.CertificateThumbprint:
+							this.Logger.WriteEntry($"Acetone configured with the following values - Cluster Connection String: {(this.ClusterConnectionStrings == null ? "NULL" : string.Join(", ", this.ClusterConnectionStrings)) }, Credentials Type: {this.CredentialsType}, Client Certificate Thumbprint: {this.ClientCertificateThumbprint}, Server Certificate Thumbprint: {(this.ServerCertificateThumbprints == null ? "NULL" : string.Join(", ", this.ServerCertificateThumbprints))}, Application Name Location: {this.ApplicationNameLocation}, Log Information: {this.Logger.Enabled}, Version Query String Parameter Name: {this.VersionParameter}, Clear Cache Query String Parameter Name: {this.ClearCacheParameter}, Service Fabric Client Partition Cache Limit: {ServiceFabricUrlResolver.Settings.PartitionLocationCacheLimit}", LogEntryType.Informational);
 						this.ServiceUrlResolver = new ServiceFabricUrlResolver(this.Logger, this.ClusterConnectionStrings, this.ClientCertificateThumbprint, this.ServerCertificateThumbprints);
 						break;
-					case CredentialsType.CertificateCommonName:
-						this.Logger.WriteEntry($"Acetone configured with the following values - Cluster Connection String: {(this.ClusterConnectionStrings == null ? "NULL" : string.Join(", ", this.ClusterConnectionStrings))}, Credentials Type: {this.CredentialsType}, Client Certificate Subject Distinguished Name: {this.ClientCertificateSubjectDistinguishedName}, Client Certificate Issuer Distinguished Name: {this.ClientCertificateIssuerDistinguishedName}, ServerCertificateCommonNames: {(this.ServerCertificateCommonNames == null ? "NULL" : string.Join(", ", this.ServerCertificateCommonNames))}, Application Name Location: {this.ApplicationNameLocation}, Log Information: {this.Logger.Enabled}, Version Query String Parameter Name: {this.VersionParameter}, Clear Cache Query String Parameter Name: {this.ClearCacheParameter}, Service Fabric Client Partition Cache Limit: {ServiceFabricUrlResolver.Settings.PartitionLocationCacheLimit}", LogEntryType.Informational);
+						case CredentialsType.CertificateCommonName:
+							this.Logger.WriteEntry($"Acetone configured with the following values - Cluster Connection String: {(this.ClusterConnectionStrings == null ? "NULL" : string.Join(", ", this.ClusterConnectionStrings))}, Credentials Type: {this.CredentialsType}, Client Certificate Subject Distinguished Name: {this.ClientCertificateSubjectDistinguishedName}, Client Certificate Issuer Distinguished Name: {this.ClientCertificateIssuerDistinguishedName}, ServerCertificateCommonNames: {(this.ServerCertificateCommonNames == null ? "NULL" : string.Join(", ", this.ServerCertificateCommonNames))}, Application Name Location: {this.ApplicationNameLocation}, Log Information: {this.Logger.Enabled}, Version Query String Parameter Name: {this.VersionParameter}, Clear Cache Query String Parameter Name: {this.ClearCacheParameter}, Service Fabric Client Partition Cache Limit: {ServiceFabricUrlResolver.Settings.PartitionLocationCacheLimit}", LogEntryType.Informational);
 						this.ServiceUrlResolver = new ServiceFabricUrlResolver(this.Logger, this.ClusterConnectionStrings, this.ClientCertificateSubjectDistinguishedName, this.ClientCertificateIssuerDistinguishedName, this.ServerCertificateCommonNames);
 						break;
-					case CredentialsType.Local:
-						this.ServiceUrlResolver = new ServiceFabricUrlResolver(this.Logger, this.ClusterConnectionStrings);
-						break;
+						case CredentialsType.Local:
+							this.ServiceUrlResolver = new ServiceFabricUrlResolver(this.Logger, this.ClusterConnectionStrings);
+							break;
+					}
+				}
+				else
+				{
+					this.Logger.WriteEntry("Acetone using pre-configured ServiceUrlResolver (likely for testing)", LogEntryType.Informational);
 				}
 
 			}
@@ -294,17 +321,37 @@ namespace Methodic.Acetone
 
 			this.Logger.WriteEntry($"Methodic Acetone Rewrite called for url {value}, invocation {invocationId}", LogEntryType.Informational);
 
-			if (string.IsNullOrWhiteSpace(value))
+			// Distinguish between null and empty/whitespace to satisfy test expectations
+			if (value == null)
 			{
-				string message = $"Critical error! Rewrite called with an empty URL. Please ensure the IIS URL rewrite rule is configured to pass the original request URL to the Acetone provider. Invocation {invocationId}";
-				this.Logger.WriteEntry(message, LogEntryType.Error);
-				throw new ArgumentNullException("Provided URL", message);
+				string messageNull = $"Critical error! Rewrite called with a null URL. Please ensure the IIS URL rewrite rule is configured to pass the original request URL to the Acetone provider. Invocation {invocationId}";
+				this.Logger.WriteEntry(messageNull, LogEntryType.Error);
+				throw new ArgumentNullException(nameof(value), messageNull);
 			}
+
+			if (value.Length == 0 || string.IsNullOrWhiteSpace(value))
+			{
+				string messageEmpty = $"Critical error! Rewrite called with an empty URL. Please ensure the IIS URL rewrite rule is configured to pass the original request URL to the Acetone provider. Invocation {invocationId}";
+				this.Logger.WriteEntry(messageEmpty, LogEntryType.Error);
+				throw new ArgumentException(messageEmpty, nameof(value));
+			}
+
+			// Heuristic validation: reject single-label hosts (no dots) unless explicitly localhost or an IP (v4/v6)
+			bool containsDot = value.Contains('.') || value.Contains(':'); // ':' may appear in scheme or port/IPv6
+			bool isLocalHost = value.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) || value.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://localhost", StringComparison.OrdinalIgnoreCase);
+			bool looksLikeIp = System.Text.RegularExpressions.Regex.IsMatch(value, @"^https?:\/\/(\d+\.\d+\.\d+\.\d+|\[[0-9a-fA-F:]+\])(:\d+)?(/|$)") || System.Text.RegularExpressions.Regex.IsMatch(value, @"^(\d+\.\d+\.\d+\.\d+)$");
+			if (!containsDot && !isLocalHost && !looksLikeIp && !value.StartsWith("http://", StringComparison.OrdinalIgnoreCase) && !value.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+			{
+				string invalidMsg = $"Invalid URL format supplied: {value}. Invocation {invocationId}";
+				this.Logger.WriteEntry(invalidMsg, LogEntryType.Error);
+				throw new ArgumentException(invalidMsg, nameof(value));
+			}
+
 			if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(value, this.ApplicationNameLocation, out string applicationName))
 			{
 				string message = $"Supplied URL of {value} has no resolvable application name";
 				this.Logger.WriteEntry(message, LogEntryType.Error);
-				throw new ArgumentException(message, "Provided URL");
+				throw new ArgumentException(message, nameof(value));
 			}
 
 

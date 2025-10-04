@@ -1,6 +1,4 @@
-﻿
-
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Fabric;
@@ -17,11 +15,16 @@ namespace Methodic.Acetone
 
 		private static readonly object applicationLock = new object();
 		private static readonly object serviceLock = new object();
+		private const int PartitionResolveMaxAttempts = 10;
+		private static readonly TimeSpan PartitionResolveInitialDelay = TimeSpan.FromMilliseconds(100); // reduced from 2s to 100ms
+		private static readonly TimeSpan PartitionResolveAttemptTimeout = TimeSpan.FromSeconds(5); // tighter timeout per attempt
+		private static readonly TimeSpan PartitionCacheTtl = TimeSpan.FromSeconds(30);
+		private static readonly ConcurrentDictionary<string, (ResolvedServicePartition partition, DateTime timestamp)> PartitionCache = new ConcurrentDictionary<string, (ResolvedServicePartition, DateTime)>();
 
 		public FabricClient Client
 		{ get; private set; }
 
-		private List<string> ClusterConnectionStrings { get; }
+		protected List<string> ClusterConnectionStrings { get; }
 		public ILogger Logger { get; }
 
 		protected static Lazy<ConcurrentDictionary<string, Application>> CachedApplications = new Lazy<ConcurrentDictionary<string, Application>>(() =>
@@ -52,14 +55,7 @@ namespace Methodic.Acetone
 		{
 			get
 			{
-				if (!CachedServices.IsValueCreated)
-				{
-					return 0;
-				}
-				else
-				{
-					return CachedServices.Value.Count;
-				}
+				return !CachedServices.IsValueCreated ? 0 : CachedServices.Value.Count;
 			}
 		}
 
@@ -90,11 +86,11 @@ namespace Methodic.Acetone
 			this.WarmupCache();
 		}
 
-		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, string clientCertificateSubjectDistinguishedName, string clientCertificateIssuerDistinguishedName, IList<string> remoteCertificateCommonNames)
+		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, string clientCertificateSubjectDistinguishedName, string clientCertificateIssuerDistinguishedName, IList<String> remoteCertificateCommonNames)
 		: this(logger, new List<string> { clusterConnectionString }, clientCertificateSubjectDistinguishedName, clientCertificateIssuerDistinguishedName, remoteCertificateCommonNames)
 		{ }
 
-		public ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionStrings, string clientCertificateSubjectDistinguishedName, string clientCertificateIssuerDistinguishedName, IList<string> remoteCertificateCommonNames)
+		public ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionStrings, string clientCertificateSubjectDistinguishedName, string clientCertificateIssuerDistinguishedName, IList<String> remoteCertificateCommonNames)
 		{
 			if (clusterConnectionStrings == default || !clusterConnectionStrings.Any())
 			{
@@ -187,6 +183,8 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry("Received service notification event, clearing service cache", LogEntryType.Informational);
 				ServiceFabricUrlResolver.CachedServices.Value.Clear();
 			}
+			// Invalidate partition cache as service topology may have changed
+			PartitionCache.Clear();
 		}
 
 		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, string clientCertificateThumbprint, string serverCertificateThumbprint)
@@ -233,198 +231,264 @@ namespace Methodic.Acetone
 
 		private void WarmupCache()
 		{
-			//Warm up cache
-			this.Logger.WriteEntry("BEGIN CACHE WARMUP", LogEntryType.Informational);
-			var list = this.Client.QueryManager.GetApplicationTypeListAsync().GetAwaiter().GetResult();
+			this.WarmupCacheCore();
+		}
 
-			foreach (var app in list)
+		protected virtual void WarmupCacheCore()
+		{
+			this.Logger.WriteEntry("BEGIN CACHE WARMUP", LogEntryType.Informational);
+			if (this.Client == null)
 			{
-				try
+				this.Logger.WriteEntry("FabricClient not initialised – skipping cache warmup", LogEntryType.Debug);
+				this.Logger.WriteEntry("END CACHE WARMUP", LogEntryType.Informational);
+				return;
+			}
+
+			try
+			{
+				var list = this.Client.QueryManager.GetApplicationTypeListAsync().GetAwaiter().GetResult();
+				foreach (var app in list)
 				{
-					this.ResolveServiceUri(app.ApplicationTypeName.Replace("Type", string.Empty), Guid.NewGuid(), null, true).Wait();
-				}
-				catch (Exception ex)
-				{
-					this.Logger.WriteEntry($"Encountered an exception warming up the cache for {app.ApplicationTypeName}: {ServiceFabricLocator.FormatException(ex)}", LogEntryType.Warning);
+					try
+					{
+						this.ResolveServiceUri(app.ApplicationTypeName.Replace("Type", string.Empty), Guid.NewGuid(), null, true).Wait();
+					}
+					catch (Exception ex)
+					{
+						this.Logger.WriteEntry($"Encountered an exception warming up the cache for {app.ApplicationTypeName}: {ServiceFabricLocator.FormatException(ex)}", LogEntryType.Warning);
+					}
 				}
 			}
-			this.Logger.WriteEntry("END CACHE WARMUP", LogEntryType.Informational);
+			catch (FabricException ex)
+			{
+				this.Logger.WriteEntry($"FabricClient cache warmup skipped due to FabricException: {ex.Message}", LogEntryType.Warning);
+			}
+			catch (TimeoutException ex)
+			{
+				this.Logger.WriteEntry($"FabricClient cache warmup timed out: {ex.Message}", LogEntryType.Warning);
+			}
+			catch (Exception ex)
+			{
+				this.Logger.WriteEntry($"FabricClient cache warmup failed: {ServiceFabricLocator.FormatException(ex)}", LogEntryType.Warning);
+			}
+			finally
+			{
+				this.Logger.WriteEntry("END CACHE WARMUP", LogEntryType.Informational);
+			}
 		}
 
 		public async Task<string> ResolveServiceUri(string applicationName, Guid invocationId, string version = null, bool refreshCache = false)
 		{
+			return await ResolveServiceUriCore(applicationName, invocationId, version, refreshCache);
+		}
+
+		protected virtual async Task<string> ResolveServiceUriCore(string applicationName, Guid invocationId, string version = null, bool refreshCache = false)
+		{
 			this.Logger.WriteEntry($"Starting to resolve url for application {applicationName}, invocation {invocationId}", LogEntryType.Informational);
 
-			//Create a cache key to refer to the application and version combination
-			string cacheKey = applicationName.ToUpperInvariant();
-			cacheKey += version ?? "-no-service-version";
+			if (string.IsNullOrWhiteSpace(applicationName))
+			{
+				throw new ArgumentException("Application name is required", nameof(applicationName));
+			}
 
-			//Attempt to retrieve the application details from cache and continue to service endpoint resolution
-			if (!refreshCache && CachedApplications.Value.TryGetValue(cacheKey, out var application))
+			string cacheKey = applicationName.ToUpperInvariant() + (version ?? "-no-service-version");
+			Application application;
+
+			if (!refreshCache && CachedApplications.Value.TryGetValue(cacheKey, out application))
 			{
 				this.Logger.WriteEntry($"Cache hit for {cacheKey}, found application {application.ApplicationName}, invocation {invocationId}", LogEntryType.Debug);
 				return await this.StatelessEndpointUri(application, invocationId);
 			}
-			//If the cache is a miss, then constrain threads to serial, and populate the cache
+
 			lock (applicationLock)
 			{
-				//double check lock (in case a thread ahead of this one was able to set the cache prior)
 				if (refreshCache || !CachedApplications.Value.TryGetValue(cacheKey, out application))
 				{
-					//Can't use async/await inside of locks. Wait for the Task to complete
-					this.Logger.WriteEntry($"Cache for key {cacheKey} was not found, so we'll construct it", LogEntryType.Debug);       //Write out a diagnostic message for cache miss and rebuild
-					var applications = this.Client.QueryManager.GetApplicationListAsync().GetAwaiter().GetResult()?.ToList();           //Call the SF cluster and query the list of available applications
-
-
-					//If we didn't find any applications, then exit early by throwing an exception
-					if (applications == default || !applications.Any())
-					{
-						this.Logger.WriteEntry($"No application found for {applicationName}, invocation {invocationId}", LogEntryType.Error);
-						throw new KeyNotFoundException($"No matching applications with applicationTypeName of {applicationName} could be found on cluster {string.Join(", ", this.ClusterConnectionStrings)}. Has the application been deployed to the cluster with the same name?");
-					}
-					applications = applications.Where(a =>
-					{
-						string applicationTypeName = a.ApplicationTypeName;
-
-						if (applicationTypeName.EndsWith("type", StringComparison.InvariantCultureIgnoreCase))
-						{
-							applicationTypeName = applicationTypeName.Substring(0, applicationTypeName.LastIndexOf("type", StringComparison.InvariantCultureIgnoreCase));
-						}
-						return applicationTypeName.Equals(applicationName, StringComparison.InvariantCultureIgnoreCase);
-					}).ToList();
-
-					//If we find more than a single version of the application running, then we must distinguish it by version.
-					if (applications.Count > 1)
-					{
-						if (string.IsNullOrEmpty(version))
-						{
-							string formattedApps = string.Join(", ", applications.Select(a => a.ApplicationTypeName + "_" + a.ApplicationTypeVersion).ToArray());
-							this.Logger.WriteEntry($"{applications.Count} application types for {applicationName} were found, please provide a version to determine a single type, invocation {invocationId}. {formattedApps}", LogEntryType.Error);
-							throw new ArgumentNullException(nameof(version), $"{applications.Count} application types for {applicationName} were found, please provide a version to determine a single type. {formattedApps}");
-						}
-						applications = applications.Where(a => a.ApplicationTypeVersion.Equals(version, StringComparison.InvariantCultureIgnoreCase)).ToList();
-						if (applications == default || !applications.Any())
-						{
-							this.Logger.WriteEntry($"{applications.Count} application types with name {applicationName} were found, none with version {version}. invocation {invocationId}", LogEntryType.Error);
-						}
-					}
-
-					//If we still have more than a single application after filtering by version, then we have a scenario which we do not currently support in this rewrite module.
-					if (applications.Count > 1)
-					{
-						string error = $"Ambiguous applications were discovered with an application name of {applicationName} with version of {version ?? "(NULL)"}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new Exception(error);
-					}
-					application = applications.SingleOrDefault();
-
-					//Some basic sanity checks
-					if (applications == default || applications.Count == 0)
-					{
-						string error = $"Could not find any application type matching {applicationName}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new KeyNotFoundException(error);
-					}
-					if (!string.IsNullOrEmpty(version) && !application.ApplicationTypeVersion.Equals(version, StringComparison.InvariantCultureIgnoreCase))
-					{
-						string error = $"Could not find any application type matching {applicationName} with version of {version}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new KeyNotFoundException(error);
-					}
-
-					//Add to cache for the following threads
-					_ = CachedApplications.Value.AddOrUpdate(cacheKey, application, (key, oldVal) =>
-					{
-						this.Logger.WriteEntry($"Adding to cache {key}, application {application.ApplicationName}, invocation {invocationId}", LogEntryType.Informational);
-						return application;
-					});
+					this.Logger.WriteEntry($"Cache for key {cacheKey} was not found, so we'll construct it", LogEntryType.Debug);
+					application = GetApplicationMetadata(applicationName, version, invocationId);
+					_ = CachedApplications.Value.AddOrUpdate(cacheKey, application, (k, v) => application);
 				}
 			}
+
 			return await StatelessEndpointUri(application, invocationId);
+		}
+
+		private Application GetApplicationMetadata(string applicationName, string version, Guid invocationId)
+		{
+			if (this.Client == null)
+			{
+				throw new InvalidOperationException("Service Fabric client has not been initialised. This resolver is operating in mock-only mode.");
+			}
+
+			var getApplicationsTask = this.Client.QueryManager.GetApplicationListAsync();
+			Task.WaitAll(getApplicationsTask);
+			var allApplications = getApplicationsTask.Result?.ToList();
+
+			if (allApplications == null || !allApplications.Any())
+			{
+				string noAppError = $"No matching applications with applicationTypeName of {applicationName} could be found on cluster {string.Join(", ", this.ClusterConnectionStrings)}. Has the application been deployed with the same name?";
+				this.Logger.WriteEntry(noAppError, LogEntryType.Error);
+				throw new KeyNotFoundException(noAppError);
+			}
+
+			var matchingApplications = FilterApplicationsByTypeName(allApplications, applicationName);
+			if (!matchingApplications.Any())
+			{
+				matchingApplications = FilterApplicationsByApplicationName(allApplications, applicationName);
+			}
+			else
+			{
+				var narrowedByExactName = FilterApplicationsByApplicationName(matchingApplications, applicationName);
+				if (narrowedByExactName.Count == 1)
+				{
+					matchingApplications = narrowedByExactName;
+				}
+			}
+
+			if (!matchingApplications.Any())
+			{
+				string error = $"Could not find any application matching {applicationName}, invocation {invocationId}";
+				this.Logger.WriteEntry(error, LogEntryType.Error);
+				throw new KeyNotFoundException(error);
+			}
+
+			if (matchingApplications.Count > 1)
+			{
+				if (!string.IsNullOrEmpty(version))
+				{
+					matchingApplications = matchingApplications.Where(a => a.ApplicationTypeVersion.Equals(version, StringComparison.InvariantCultureIgnoreCase)).ToList();
+				}
+
+				if (!matchingApplications.Any())
+				{
+					string error = $"Could not find any application matching {applicationName} with version of {version}, invocation {invocationId}";
+					this.Logger.WriteEntry(error, LogEntryType.Error);
+					throw new KeyNotFoundException(error);
+				}
+
+				var normalizedTarget = NormalizeApplicationIdentifier(applicationName);
+				var exactNameMatches = matchingApplications.Where(a => NormalizeApplicationIdentifier(a.ApplicationName?.AbsoluteUri).Equals(normalizedTarget, StringComparison.InvariantCultureIgnoreCase)).ToList();
+				if (exactNameMatches.Count == 1)
+				{
+					matchingApplications = exactNameMatches;
+				}
+				else if (exactNameMatches.Count > 1)
+				{
+					matchingApplications = exactNameMatches;
+				}
+
+				if (matchingApplications.Count > 1)
+				{
+					var readyApplications = matchingApplications.Where(a => a.ApplicationStatus == ApplicationStatus.Ready).ToList();
+					if (readyApplications.Any())
+					{
+						matchingApplications = readyApplications;
+					}
+				}
+
+				if (matchingApplications.Count > 1)
+				{
+					var selected = matchingApplications.OrderBy(a => NormalizeApplicationIdentifier(a.ApplicationName?.AbsoluteUri)).First();
+					this.Logger.WriteEntry($"Multiple applications matched {applicationName}. Selecting {selected.ApplicationName}", LogEntryType.Warning);
+					return selected;
+				}
+			}
+
+			return matchingApplications.Single();
+		}
+
+		private static List<Application> FilterApplicationsByTypeName(IEnumerable<Application> applications, string applicationName)
+		{
+			if (applications == null)
+			{
+				return new List<Application>();
+			}
+
+			string normalizedTarget = NormalizeApplicationIdentifier(applicationName);
+			return applications.Where(a =>
+			{
+				string normalisedTypeName = NormalizeApplicationType(a.ApplicationTypeName);
+				return normalisedTypeName.Equals(normalizedTarget, StringComparison.InvariantCultureIgnoreCase);
+			}).ToList();
+		}
+
+		private static List<Application> FilterApplicationsByApplicationName(IEnumerable<Application> applications, string applicationName)
+		{
+			if (applications == null)
+			{
+				return new List<Application>();
+			}
+
+			string normalizedTarget = NormalizeApplicationIdentifier(applicationName);
+			return applications.Where(a =>
+			{
+				var candidate = NormalizeApplicationIdentifier(a.ApplicationName?.AbsoluteUri);
+				return candidate.Equals(normalizedTarget, StringComparison.InvariantCultureIgnoreCase);
+			}).ToList();
+		}
+
+		private static string NormalizeApplicationType(string value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+			{
+				return string.Empty;
+			}
+
+			value = value.Trim();
+			int index = value.LastIndexOf("type", StringComparison.InvariantCultureIgnoreCase);
+			if (index >= 0)
+			{
+				value = value.Substring(0, index);
+			}
+
+			return NormalizeApplicationIdentifier(value);
+		}
+
+		private static string NormalizeApplicationIdentifier(string value)
+		{
+			if (string.IsNullOrWhiteSpace(value))
+			{
+				return string.Empty;
+			}
+
+			value = value.Trim();
+			if (value.StartsWith("fabric:/", StringComparison.InvariantCultureIgnoreCase))
+			{
+				value = value.Substring("fabric:/".Length);
+			}
+			else if (value.StartsWith("fabric:", StringComparison.InvariantCultureIgnoreCase))
+			{
+				value = value.Substring("fabric:".Length);
+			}
+
+			return value.Trim('/');
 		}
 
 		public async Task<string> ResolveFunctionUri(string applicationName, Guid invocationId, string version = null, bool refreshCache = false)
 		{
+			return await ResolveFunctionUriCore(applicationName, invocationId, version, refreshCache);
+		}
+
+		protected virtual async Task<string> ResolveFunctionUriCore(string applicationName, Guid invocationId, string version = null, bool refreshCache = false)
+		{
 			this.Logger.WriteEntry($"Starting to resolve url for function in {applicationName}, invocation {invocationId}", LogEntryType.Informational);
 
-			//Create a cache key to refer to the application and version combination
 			string cacheKey = $"{applicationName}-FKT-{version ?? "no-version"}";
+			Application application;
 
-			//Attempt to retrieve the application details from cache and continue to service endpoint resolution
-			if (!refreshCache && CachedApplications.Value.TryGetValue(cacheKey, out var application))
+			if (!refreshCache && CachedApplications.Value.TryGetValue(cacheKey, out application))
 			{
 				this.Logger.WriteEntry($"Cache hit for {cacheKey}, found application {application.ApplicationName}, invocation {invocationId}", LogEntryType.Informational);
 				return await this.FunctionEndpointUri(application, invocationId);
 			}
 
-			//If the cache is a miss, then constrain threads to serial, and populate the cache
 			lock (applicationLock)
 			{
-				//double check lock (in case a thread ahead of this one was able to set the cache prior)
 				if (refreshCache || !CachedApplications.Value.TryGetValue(cacheKey, out application))
 				{
-					System.Diagnostics.Trace.WriteLine($"Cache for key {cacheKey} was not found, so we'll construct it");   //Write out a diagnostic message for cache miss and rebuild
-					var getApplicationsTask = this.Client.QueryManager.GetApplicationListAsync();                           //Call the SF cluster and query the list of available applications
-					Task.WaitAll(getApplicationsTask);                                                                      //Can't use async/await inside of locks. Wait for the Task to complete
-					var applications = getApplicationsTask.Result?.ToList();
-
-					//If we didn't find any applications, then exit early by throwing an exception
-					if (applications == default || !applications.Any())
-					{
-						string error = $"No matching applications with applicationTypeName of {applicationName} could be found on cluster {string.Join(", ", this.ClusterConnectionStrings)}. Has the application been deployed to the cluster with the same name? invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new KeyNotFoundException(error);
-					}
-					applications = applications.Where(a =>
-					{
-						return a.ApplicationTypeName.StartsWith(applicationName, StringComparison.InvariantCultureIgnoreCase);
-					}).ToList();
-
-					//If we find more than a single version of the application running, then we must distinguish it by version.
-					if (applications.Count > 1)
-					{
-						if (string.IsNullOrEmpty(version))
-						{
-							string error = $"{applications.Count} application types were found, please provide a version to determine a single type, invocation {invocationId}";
-							this.Logger.WriteEntry(error, LogEntryType.Error);
-							throw new ArgumentNullException(nameof(version), error);
-						}
-						applications = applications.Where(a => a.ApplicationTypeVersion.Equals(version, StringComparison.InvariantCultureIgnoreCase)).ToList();
-						if (applications == default || !applications.Any())
-						{
-							this.Logger.WriteEntry($"{applications.Count} application types were found, none with version {version}, invocation {invocationId}", LogEntryType.Error);
-						}
-					}
-
-					//If we still have more than a single application after filtering by version, then we have a scenario which we do not currently support in this rewrite module.
-					if (applications.Count > 1)
-					{
-						string error = $"Ambiguous applications were discovered with an application name of {applicationName} with version of {version ?? "(NULL)"}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new Exception(error);
-					}
-					application = applications.SingleOrDefault();
-
-					//Some basic sanity checks
-					if (applications == default || applications.Count == 0)
-					{
-						string error = $"Could not find any application type matching {applicationName}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new KeyNotFoundException(error);
-					}
-					if (!string.IsNullOrEmpty(version) && !application.ApplicationTypeVersion.Equals(version, StringComparison.InvariantCultureIgnoreCase))
-					{
-						string error = $"Could not find any application type matching {applicationName} with version of {version}, invocation {invocationId}";
-						this.Logger.WriteEntry(error, LogEntryType.Error);
-						throw new KeyNotFoundException(error);
-					}
-
-					//Add to cache for the following threads
-					_ = CachedApplications.Value.AddOrUpdate(cacheKey, application, (key, oldVal) =>
-					{
-						this.Logger.WriteEntry($"Adding to cache {key}, application {application.ApplicationName}, invocation {invocationId}", LogEntryType.Informational);
-						return application;
-					});
+					System.Diagnostics.Trace.WriteLine($"Cache for key {cacheKey} was not found, so we'll construct it");
+					application = GetApplicationMetadata(applicationName, version, invocationId);
+					_ = CachedApplications.Value.AddOrUpdate(cacheKey, application, (k, v) => application);
 				}
 			}
 			return await FunctionEndpointUri(application, invocationId);
@@ -432,59 +496,55 @@ namespace Methodic.Acetone
 
 		public async Task<string> StatelessEndpointUri(Application applicationInfo, Guid invocationId, bool refreshCache = false)
 		{
-			if (applicationInfo is null)
+			if (applicationInfo == null)
 			{
 				throw new ArgumentNullException(nameof(applicationInfo));
 			}
-			//Service cache key is pretty simple for stateless services, it's the application name as we only support a single stateless service for a given application
 			string cacheKey = applicationInfo.ApplicationName.AbsoluteUri;
 
-			//Try and get the service information from cache so as to not query the cluster
 			if (!refreshCache && CachedServices.Value.TryGetValue(cacheKey, out var serviceInfo))
 			{
 				return await this.PartitionEndpoint(serviceInfo, invocationId);
 			}
 
-			//Serialize threads while adding to cache
 			lock (serviceLock)
 			{
-				//Double check lock
 				if (refreshCache || !CachedServices.Value.TryGetValue(cacheKey, out serviceInfo))
 				{
-					//Get all services for the unique application
 					var getServiceInfoTask = this.Client.QueryManager.GetServiceListAsync(applicationInfo.ApplicationName);
 					Task.WaitAll(getServiceInfoTask);
 					var serviceInfoList = getServiceInfoTask.Result.ToList();
-					if (serviceInfoList == default)
+					if (serviceInfoList == null)
 					{
-						throw new KeyNotFoundException($"Not a single service was found within the determined application with name {applicationInfo.ApplicationName}, type name of {applicationInfo.ApplicationTypeName} and type version of {applicationInfo.ApplicationTypeVersion}");
+						throw new KeyNotFoundException($"Not a single service was found within application {applicationInfo.ApplicationName}");
 					}
-					//Find the stateless service within the given application which is the API
+
 					var statelessServices = serviceInfoList.Where(s => s.ServiceKind == System.Fabric.Query.ServiceKind.Stateless && (s.ServiceTypeName.ToUpperInvariant().Contains("API") || s.ServiceTypeName.ToUpperInvariant().Contains("SERVICE"))).ToList();
-					if (statelessServices == default || !statelessServices.Any())
+
+					if (statelessServices == null || !statelessServices.Any())
 					{
-						this.Logger.WriteEntry($"Application with name {applicationInfo.ApplicationName} has no services which are stateless and have 'API' in the type name, invocation {invocationId}", LogEntryType.Error);
-						throw new KeyNotFoundException($"Application with name {applicationInfo.ApplicationName} has no services which are stateless and have 'API' in the type name");
+						string error = $"Application {applicationInfo.ApplicationName} has no matching stateless services (expects a single *API* or *Service* in type name), invocation {invocationId}";
+						this.Logger.WriteEntry(error, LogEntryType.Error);
+						throw new KeyNotFoundException(error);
 					}
 					if (statelessServices.Count > 1)
 					{
-						string error = $"{statelessServices.Count} stateless services with 'API' in the name was discovered for application name {applicationInfo.ApplicationName} which is too ambiguous, invocation {invocationId}";
+						string error = $"{statelessServices.Count} stateless services matched heuristic (API/SERVICE) for application {applicationInfo.ApplicationName}. Invocation {invocationId}";
 						this.Logger.WriteEntry(error, LogEntryType.Error);
 						throw new Exception(error);
 					}
 					serviceInfo = statelessServices.Single();
 
-					//Add to cache for following threads
-					_ = CachedServices.Value.AddOrUpdate(cacheKey, serviceInfo, (key, oldVal) =>
+					_ = CachedServices.Value.AddOrUpdate(cacheKey, serviceInfo, (k, v) =>
 					{
 						var svcdesc = new System.Fabric.Description.ServiceNotificationFilterDescription(serviceInfo.ServiceName, true, false);
 						this.Client.ServiceManager.RegisterServiceNotificationFilterAsync(svcdesc).Wait();
-						this.Logger.WriteEntry($"Adding to cache {cacheKey}, application {serviceInfo.ServiceTypeName}, invocation {invocationId}", LogEntryType.Informational);
+						this.Logger.WriteEntry($"Adding to cache {cacheKey}, service {serviceInfo.ServiceTypeName}, invocation {invocationId}", LogEntryType.Informational);
 						return serviceInfo;
 					});
 				}
 			}
-			return await PartitionEndpoint(serviceInfo, invocationId);
+			return await PartitionEndpoint(CachedServices.Value[cacheKey], invocationId);
 		}
 
 		public async Task<string> FunctionEndpointUri(Application applicationInfo, Guid invocationId, bool refreshCache = false)
@@ -513,14 +573,14 @@ namespace Methodic.Acetone
 					var getServiceInfoTask = this.Client.QueryManager.GetServiceListAsync(applicationInfo.ApplicationName);
 					Task.WaitAll(getServiceInfoTask);
 					var serviceInfoList = getServiceInfoTask.Result.ToList();
-					if (serviceInfoList == default)
+					if (serviceInfoList == null)
 					{
 						throw new KeyNotFoundException($"Not a single service was found within the determined application with name {applicationInfo.ApplicationName}, type name of {applicationInfo.ApplicationTypeName} and type version of {applicationInfo.ApplicationTypeVersion}");
 					}
 
 					//Find the stateless service within the given application which is the API
 					var statelessServices = serviceInfoList.Where(s => s.ServiceKind == System.Fabric.Query.ServiceKind.Stateless && s.ServiceTypeName.ToUpperInvariant().Contains("FUNCTION")).ToList();
-					if (statelessServices == default || !statelessServices.Any())
+					if (statelessServices == null || !statelessServices.Any())
 					{
 						string error = $"Application with name {applicationInfo.ApplicationName} has no function services which are stateless and have 'FUNCTION' in the type name, invocation {invocationId}";
 						this.Logger.WriteEntry(error, LogEntryType.Error);
@@ -537,7 +597,7 @@ namespace Methodic.Acetone
 
 
 					//Add to cache for following threads
-					_ = CachedServices.Value.AddOrUpdate(cacheKey, serviceInfo, (key, oldVal) =>
+					_ = CachedServices.Value.AddOrUpdate(cacheKey, serviceInfo, (k, v) =>
 					{
 						var svcdesc = new System.Fabric.Description.ServiceNotificationFilterDescription(serviceInfo.ServiceName, true, false);
 						this.Client.ServiceManager.RegisterServiceNotificationFilterAsync(svcdesc).Wait();
@@ -558,10 +618,32 @@ namespace Methodic.Acetone
 				throw new ArgumentNullException(nameof(service), error);
 			}
 
-
 			this.Logger.WriteEntry($"Getting url for service {service.ServiceName}, invocation {invocationId}", LogEntryType.Informational);
 
-			var cachedServicePartition = await this.Client.ServiceManager.ResolveServicePartitionAsync(service.ServiceName);
+			ResolvedServicePartition cachedServicePartition = null;
+			string cacheKey = service.ServiceName.AbsoluteUri;
+			bool cacheDisabled = string.Equals(Environment.GetEnvironmentVariable("ACETONE_DISABLE_PARTITION_CACHE"), "1", StringComparison.OrdinalIgnoreCase);
+			if (!cacheDisabled && PartitionCache.TryGetValue(cacheKey, out var entry))
+			{
+				if (DateTime.UtcNow - entry.timestamp < PartitionCacheTtl)
+				{
+					cachedServicePartition = entry.partition;
+					this.Logger.WriteEntry($"Partition cache hit for {service.ServiceName}", LogEntryType.Debug);
+				}
+				else
+				{
+					PartitionCache.TryRemove(cacheKey, out _);
+				}
+			}
+
+			if (cachedServicePartition == null)
+			{
+				cachedServicePartition = await ResolveServicePartitionWithRetryAsync(service.ServiceName, invocationId);
+				if (!cacheDisabled)
+				{
+					PartitionCache[cacheKey] = (cachedServicePartition, DateTime.UtcNow);
+				}
+			}
 
 			this.Logger.WriteEntry($"Found partition {cachedServicePartition.Info.Id}, invocation {invocationId}", LogEntryType.Debug);
 			var cachedEndpoint = cachedServicePartition.GetEndpoint();
@@ -588,106 +670,76 @@ namespace Methodic.Acetone
 			//For some reason, the address contains a JSON object, not sure why but this will deal with both scenarios
 			if (address.Contains('{')) //JSON Result on endpoint address?
 			{
-				address = EndpointJsonToText(endpoint.Address, this.Logger);
+				address = ServiceFabricUrlParser.EndpointJsonToText(endpoint.Address, this.Logger);
 			}
-			if (address.Contains("0.0.0.0"))
-			{
-				this.Logger.WriteEntry("Result from Service Fabric contains a local IP address of 0.0.0.0 which is non-routable and will be replaced with loopback of 127.0.0.1", LogEntryType.Warning);
-				address = address.Replace("0.0.0.0", "127.0.0.1");
-			}
+
+			// Normalize local addresses
+			address = ServiceFabricUrlParser.NormalizeLocalEndpoint(address, this.Logger);
+
 			//If there are multiple, then just return the first(?)
 			return address;
 		}
 
-		public static string EndpointJsonToText(string json, ILogger logger)
+		private async Task<ResolvedServicePartition> ResolveServicePartitionWithRetryAsync(Uri serviceName, Guid invocationId)
 		{
-			//The previous JSON deserialize was taking too long so it has been replaced with the below regex with 4x improvements
+			Exception lastException = null;
+			TimeSpan delay = PartitionResolveInitialDelay;
 
-			//Replace the javascript escapes that seem to come in from SF endpoint object cluster, but not the local test cluster.
-			json = json.Replace(@"\/", "/");
-
-			//Workspace used to write regex here:
-			//https://regex101.com/r/sTrkU2/1
-
-			//Match on possible protocols - not sure if others need to be added in the beginning?, then domain/host which may have subdomain in dot notation, then optional port number after a colon
-			string pattern = @"(http|tcp|https):\/\/([\w_-]+(?:(?:\.?[\w_-]+)+))(:([\d]*))?";
-			var match = System.Text.RegularExpressions.Regex.Match(json, pattern);
-			if (match.Success)
+			for (int attempt = 1; attempt <= PartitionResolveMaxAttempts; attempt++)
 			{
-				//If we match, the URL matched needs to be returned, otherwise we throw an error
-				return match.Value;
+				try
+				{
+					var partition = await this.Client.ServiceManager.ResolveServicePartitionAsync(serviceName, PartitionResolveAttemptTimeout);
+					if (partition != null)
+					{
+						return partition;
+					}
+				}
+				catch (FabricTransientException ex)
+				{
+					lastException = ex;
+					this.Logger.WriteEntry($"Partition resolve transient failure for {serviceName}: {ex.Message}", LogEntryType.Debug);
+				}
+				catch (TimeoutException ex)
+				{
+					lastException = ex;
+					this.Logger.WriteEntry($"Partition resolve timeout for {serviceName}: {ex.Message}", LogEntryType.Debug);
+				}
+
+				if (attempt < PartitionResolveMaxAttempts)
+				{
+					await Task.Delay(delay);
+					// Exponential backoff with cap at 2 seconds
+					delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 2000));
+				}
 			}
-			else
-			{
-				string error = $"Found no endpoint for the application in {json}";
-				logger.WriteEntry(error, LogEntryType.Error);
-				throw new Exception(error);
-			}
+
+			throw lastException ?? new TimeoutException($"Unable to resolve partition for {serviceName} after {PartitionResolveMaxAttempts} attempts, invocation {invocationId}");
 		}
 
 		/// <summary>
-		/// Returns the name of the service fabric application but using a simple algorithm based on the nameLocation mode
+		/// Extracts the endpoint URL from a Service Fabric endpoint JSON string.
+		/// This method delegates to ServiceFabricUrlParser for the actual parsing logic.
 		/// </summary>
-		/// <param name="url">original url which contains the application name</param>
-		/// <param name="nameLocation">Dictates where the application name will be found. Subdomain (service.test.methodic.online), SubdomainWithEnvironment (test-service.methodic.online) or FirstUrlFragment (api.test.methodic.online/service)</param>
-		/// <returns>name of application type to search for within the service fabric cluster</returns>
+		/// <param name="json">The JSON string or plain URL from the Service Fabric endpoint.</param>
+		/// <param name="logger">Logger for diagnostic output.</param>
+		/// <returns>The extracted endpoint URL.</returns>
+		public static string EndpointJsonToText(string json, ILogger logger)
+		{
+			return ServiceFabricUrlParser.EndpointJsonToText(json, logger);
+		}
+
+		/// <summary>
+		/// Extracts the Service Fabric application name from a URL based on the specified location strategy.
+		/// This method delegates to ServiceFabricUrlParser for the actual parsing logic.
+		/// </summary>
+		/// <param name="url">The URL to parse. May or may not include the protocol scheme.</param>
+		/// <param name="nameLocation">Specifies where in the URL the application name is located.</param>
+		/// <param name="applicationName">Output parameter containing the extracted application name.</param>
+		/// <returns>True if the application name was successfully extracted; otherwise false.</returns>
 		public static bool TryGetApplicationNameFromUrl(string url, ApplicationNameLocation nameLocation, out string applicationName)
 		{
-			if (!url.StartsWith(Uri.UriSchemeHttp, StringComparison.InvariantCultureIgnoreCase) && !url.StartsWith(Uri.UriSchemeHttps, StringComparison.InvariantCultureIgnoreCase))
-			{
-				url = Uri.UriSchemeHttps + "://" + url;
-			}
-			if (Uri.TryCreate(url, UriKind.Absolute, out Uri originalUri))
-			{
-				string extractedName = string.Empty;
-				
-				switch (nameLocation)
-				{
-					case ApplicationNameLocation.Subdomain:
-						extractedName = originalUri.Host.Split('.').First(); //expects service.uat.company.com
-						break;
-					case ApplicationNameLocation.SubdomainPreHyphens:
-						extractedName = originalUri.Host.Split('.').First().Split('-').First(); //expects service-uat-01.company.com
-						break;
-					case ApplicationNameLocation.SubdomainPostHyphens:
-						extractedName = originalUri.Host.Split('.').First().Split('-').Last(); //expects uat-01-service.company.com
-						break;
-					case ApplicationNameLocation.FirstUrlFragment:
-						extractedName = originalUri.Segments.Length > 1 ? originalUri.Segments[1].Trim('/', '\\') : originalUri.AbsolutePath.Trim('/', '\\'); //expects connect.uat.copmany.com/service
-						break;
-					default:
-						extractedName = originalUri.Segments[1].Trim('/', '\\');
-						break;
-				}
-
-				// Check if this is a pull request URL pattern: {serviceName}-{pullRequestId}
-				// Only check for Subdomain and FirstUrlFragment modes as they are most likely to contain PR patterns
-				if ((nameLocation == ApplicationNameLocation.Subdomain || nameLocation == ApplicationNameLocation.FirstUrlFragment) && 
-					extractedName.Contains("-") && 
-					System.Text.RegularExpressions.Regex.IsMatch(extractedName, @"^(.+)-(\d+)$"))
-				{
-					var match = System.Text.RegularExpressions.Regex.Match(extractedName, @"^(.+)-(\d+)$");
-					if (match.Success)
-					{
-						string serviceName = match.Groups[1].Value;
-						string prNumber = match.Groups[2].Value;
-						
-						// Transform to Service Fabric application name format: {ServiceName}-PR{PullRequestId}
-						// Capitalize first letter of service name to match typical Service Fabric naming conventions
-						string capitalizedServiceName = char.ToUpper(serviceName[0]) + serviceName.Substring(1).ToLower();
-						applicationName = $"{capitalizedServiceName}-PR{prNumber}";
-						return true;
-					}
-				}
-
-				// For non-PR URLs, return the extracted name as-is
-				applicationName = extractedName;
-				return true;
-			}
-
-			//Supplied URL has no resolvable application name
-			applicationName = url;
-			return false;
+			return ServiceFabricUrlParser.TryGetApplicationNameFromUrl(url, nameLocation, out applicationName);
 		}
 
 		public void Dispose()
