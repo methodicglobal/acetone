@@ -1,3 +1,121 @@
 // Moved from original test project to dedicated integration test assembly
-using System;using System.Collections.Concurrent;using System.Collections.Generic;using System.Diagnostics;using System.Linq;using System.Threading;using System.Threading.Tasks;using Microsoft.VisualStudio.TestTools.UnitTesting;using Microsoft.Web.Iis.Rewrite;using Methodic.Acetone;
-namespace Methodic.Acetone.IntegrationTests { [TestClass] public class ServiceFabricIntegrated { private static readonly ILogger logger = new TraceLogger { Enabled = true }; private const string ClusterEndpoint = "localhost:19000"; private const int ServiceDeploymentCount = 4; private static bool useRealCluster; private static Methodic.Acetone.Tests.ServiceFabricTestClusterManager clusterManager; private static List<string> servicesUnderTest = new List<string>(); private static readonly List<string> mockServices = new List<string> { "ServiceA", "ServiceB", "Guard", "ServiceA-PR1234" }; private static (IServiceUrlResolver resolver, IDisposable disposable) CreateResolver(ILogger instanceLogger) { if (useRealCluster) { var realResolver = new ServiceFabricUrlResolver(instanceLogger, ClusterEndpoint); return (realResolver, realResolver); } var mockResolver = new Methodic.Acetone.Tests.MockServiceFabricUrlResolver(instanceLogger, ClusterEndpoint); return (mockResolver, mockResolver); } [ClassInitialize] public static async Task ClassSetup(TestContext context) { Console.WriteLine("Service Fabric Integration Tests (separated)"); bool skipDeployment = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_DEPLOY"), "1", StringComparison.OrdinalIgnoreCase); useRealCluster = !skipDeployment && Methodic.Acetone.Tests.ClusterAvailabilityHelper.IsClusterAvailable("localhost", 19000); if (useRealCluster) { try { clusterManager = new Methodic.Acetone.Tests.ServiceFabricTestClusterManager(ClusterEndpoint, logger); useRealCluster = clusterManager.IsClusterAvailable; if (useRealCluster) { var solutionApps = await clusterManager.DeploySolutionApplicationsAsync(); var syntheticApps = await clusterManager.DeployTestApplicationsAsync(ServiceDeploymentCount, "AcetoneIntegrationTest"); servicesUnderTest = solutionApps.Concat(syntheticApps).Distinct().ToList(); if (servicesUnderTest.Count == 0) { useRealCluster = false; } } } catch { useRealCluster = false; } } if (!useRealCluster) { servicesUnderTest = new List<string>(mockServices); } await Task.CompletedTask; } [ClassCleanup] public static void ClassCleanup() { if (clusterManager != null && useRealCluster) { try { bool skipUnprovision = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_APP_TYPE_UNPROVISION"), "1", StringComparison.OrdinalIgnoreCase); clusterManager.RemoveAllDeployedApplicationsAsync(!skipUnprovision).GetAwaiter().GetResult(); } catch { } finally { clusterManager.Dispose(); clusterManager = null; } } } [TestMethod] public void EndpointResolutionSuccess() { if (servicesUnderTest.Count == 0) { Assert.Inconclusive("No services available"); return; } int numberOfTests = useRealCluster ? Math.Max(servicesUnderTest.Count * 40, 200) : 1000; var random = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode())); ConcurrentBag<long> times = new ConcurrentBag<long>(); var (resolver, disposable) = CreateResolver(logger); using (disposable) { Parallel.For(0, numberOfTests, _ => { int serviceIndex = random.Value.Next(0, servicesUnderTest.Count); var sw = Stopwatch.StartNew(); resolver.ResolveServiceUri(servicesUnderTest[serviceIndex], Guid.Empty).GetAwaiter().GetResult(); sw.Stop(); times.Add(sw.ElapsedMilliseconds); }); } double averageTime = times.Average(); double expected = useRealCluster ? 300 : 100; Assert.IsTrue(averageTime < expected, $"Average {averageTime} >= {expected}"); } } }
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Microsoft.Web.Iis.Rewrite;
+using Methodic.Acetone;
+
+namespace Methodic.Acetone.IntegrationTests
+{
+    [TestClass]
+    public class ServiceFabricIntegrated
+    {
+        private static readonly ILogger logger = new TraceLogger { Enabled = true };
+        private const string ClusterEndpoint = "localhost:19000";
+        private const int ServiceDeploymentCount = 4;
+        private static bool useRealCluster;
+        private static Methodic.Acetone.Tests.ServiceFabricTestClusterManager clusterManager;
+        private static List<string> servicesUnderTest = new List<string>();
+        private static readonly List<string> mockServices = new List<string> { "ServiceA", "ServiceB", "Guard", "ServiceA-PR1234" };
+
+        private static (IServiceUrlResolver resolver, IDisposable disposable) CreateResolver(ILogger instanceLogger)
+        {
+            if (useRealCluster)
+            {
+                var realResolver = new ServiceFabricUrlResolver(instanceLogger, ClusterEndpoint);
+                return (realResolver, realResolver);
+            }
+            var mockResolver = new Methodic.Acetone.Tests.MockServiceFabricUrlResolver(instanceLogger, ClusterEndpoint);
+            return (mockResolver, mockResolver);
+        }
+
+        [ClassInitialize]
+        public static async Task ClassSetup(TestContext context)
+        {
+            Console.WriteLine("Service Fabric Integration Tests (separated)");
+            bool skipDeployment = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_DEPLOY"), "1", StringComparison.OrdinalIgnoreCase);
+            useRealCluster = !skipDeployment && Methodic.Acetone.Tests.ClusterAvailabilityHelper.IsClusterAvailable("localhost", 19000);
+            if (useRealCluster)
+            {
+                try
+                {
+                    clusterManager = new Methodic.Acetone.Tests.ServiceFabricTestClusterManager(ClusterEndpoint, logger);
+                    useRealCluster = clusterManager.IsClusterAvailable;
+                    if (useRealCluster)
+                    {
+                        var solutionApps = await clusterManager.DeploySolutionApplicationsAsync();
+                        var syntheticApps = await clusterManager.DeployTestApplicationsAsync(ServiceDeploymentCount, "AcetoneIntegrationTest");
+                        servicesUnderTest = solutionApps.Concat(syntheticApps).Distinct().ToList();
+                        if (servicesUnderTest.Count == 0)
+                        {
+                            useRealCluster = false;
+                        }
+                    }
+                }
+                catch
+                {
+                    useRealCluster = false;
+                }
+            }
+            if (!useRealCluster)
+            {
+                servicesUnderTest = new List<string>(mockServices);
+            }
+            await Task.CompletedTask;
+        }
+
+        [ClassCleanup]
+        public static void ClassCleanup()
+        {
+            if (clusterManager != null && useRealCluster)
+            {
+                try
+                {
+                    bool skipUnprovision = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_APP_TYPE_UNPROVISION"), "1", StringComparison.OrdinalIgnoreCase);
+                    clusterManager.RemoveAllDeployedApplicationsAsync(!skipUnprovision).GetAwaiter().GetResult();
+                }
+                catch
+                {
+                }
+                finally
+                {
+                    clusterManager.Dispose();
+                    clusterManager = null;
+                }
+            }
+        }
+
+        [TestMethod]
+        public void EndpointResolutionSuccess()
+        {
+            if (servicesUnderTest.Count == 0)
+            {
+                Assert.Inconclusive("No services available");
+                return;
+            }
+            int numberOfTests = useRealCluster ? Math.Max(servicesUnderTest.Count * 40, 200) : 1000;
+            var random = new ThreadLocal<Random>(() => new Random(Guid.NewGuid().GetHashCode()));
+            ConcurrentBag<long> times = new ConcurrentBag<long>();
+            var (resolver, disposable) = CreateResolver(logger);
+            using (disposable)
+            {
+                Parallel.For(0, numberOfTests, _ =>
+                {
+                    int serviceIndex = random.Value.Next(0, servicesUnderTest.Count);
+                    var sw = Stopwatch.StartNew();
+                    resolver.ResolveServiceUri(servicesUnderTest[serviceIndex], Guid.Empty).GetAwaiter().GetResult();
+                    sw.Stop();
+                    times.Add(sw.ElapsedMilliseconds);
+                });
+            }
+            double averageTime = times.Average();
+            double expected = useRealCluster ? 300 : 100;
+            Assert.IsTrue(averageTime < expected, $"Average {averageTime} >= {expected}");
+        }
+    }
+}
