@@ -10,13 +10,13 @@ permissions:
   actions: read
 
 jobs:
-  build:
+  build_and_test:
     runs-on: windows-latest
     env:
       SOLUTION_FILE: Methodic.Acetone.sln
       BUILD_CONFIGURATION: Release
-      ARTIFACT_NAME: acetone-output
-      ARTIFACT_ZIP: acetone-bin.zip
+      ARTIFACT_NAME: acetone-net481
+      ARTIFACT_ZIP: acetone-net481.zip
 
     steps:
       - name: Checkout (with tags)
@@ -36,17 +36,103 @@ jobs:
       - name: Build (MSBuild)
         run: msbuild "$env:SOLUTION_FILE" /p:Configuration=$env:BUILD_CONFIGURATION /m
 
+      # Discover and run unit tests
+      - name: Discover test assemblies
+        id: test-discovery
+        shell: pwsh
+        run: |
+          # Find test DLLs ending with Tests.dll under bin/Release (excluding infrastructure DLLs)
+          $testAssemblies = Get-ChildItem -Path . -Recurse -Filter "*Tests.dll" | 
+            Where-Object { 
+              $_.FullName -match "\\bin\\.*\\$env:BUILD_CONFIGURATION\\" -and
+              $_.Name -notmatch "TestAdapter|TestHost|TestPlatform"
+            } | Select-Object -ExpandProperty FullName
+
+          if (-not $testAssemblies -or $testAssemblies.Count -eq 0) {
+            Write-Error "No test assemblies found matching *Tests.dll in bin/$env:BUILD_CONFIGURATION"
+            exit 1
+          }
+
+          Write-Host "Found test assemblies:"
+          $testAssemblies | ForEach-Object { Write-Host "  $_" }
+          
+          # Save test assemblies for next step (as multi-line string)
+          $testAssemblies -join "`n" | Out-File -FilePath "$env:RUNNER_TEMP\test-assemblies.txt" -Encoding utf8
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $testAssemblies = Get-Content "$env:RUNNER_TEMP\test-assemblies.txt"
+          
+          # Create output directory for TRX files
+          $trxOutputDir = "$env:RUNNER_TEMP\TestResults"
+          New-Item -ItemType Directory -Force -Path $trxOutputDir | Out-Null
+
+          # Find vstest.console.exe
+          $vstestPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
+            -latest -products * -requires Microsoft.VisualStudio.Component.ManagedDesktop.Core `
+            -find "Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
+
+          if (-not $vstestPath -or -not (Test-Path $vstestPath)) {
+            Write-Error "vstest.console.exe not found"
+            exit 1
+          }
+
+          Write-Host "Using vstest.console.exe: $vstestPath"
+
+          # Run tests for each assembly
+          foreach ($assembly in $testAssemblies) {
+            $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assembly)
+            $trxFile = Join-Path $trxOutputDir "$assemblyName.trx"
+            
+            Write-Host "Running tests in: $assemblyName"
+            & $vstestPath $assembly /Logger:"trx;LogFileName=$trxFile" /Platform:x64
+            
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Tests failed in $assemblyName"
+              exit $LASTEXITCODE
+            }
+          }
+
+          Write-Host "All tests passed successfully"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()  # Upload results even if tests fail
+        with:
+          name: test-results-trx
+          path: ${{ runner.temp }}/TestResults/*.trx
+          retention-days: 14
+
       # Package the main library output (adjust if you want tests or extras)
       - name: Package build output
         shell: pwsh
         run: |
+          # Verify the Methodic.Acetone output path exists
+          $acetoneOutput = ".\Methodic.Acetone\bin\$env:BUILD_CONFIGURATION"
+          if (-not (Test-Path $acetoneOutput)) {
+            Write-Error "Expected build output path not found: $acetoneOutput"
+            exit 1
+          }
+
           $out = Join-Path $env:RUNNER_TEMP $env:ARTIFACT_NAME
           New-Item -Force -ItemType Directory -Path $out | Out-Null
-          # Primary project binaries
-          Copy-Item -Recurse -Force ".\Methodic.Acetone\bin\$env:BUILD_CONFIGURATION\*" $out
-          # If you want to include the Reference Assemblies folder in the zip, uncomment:
-          # Copy-Item -Recurse -Force ".\Reference Assemblies\Microsoft\IIS\*" (Join-Path $out "ReferenceAssemblies\Microsoft\IIS")
+          
+          # Package ONLY Methodic.Acetone project binaries
+          Copy-Item -Recurse -Force "$acetoneOutput\*" $out
+          
+          Write-Host "Packaged files:"
+          Get-ChildItem -Recurse $out | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
+          
           Compress-Archive -Path "$out\*" -DestinationPath "$env:ARTIFACT_ZIP" -Force
+          Write-Host "Created archive: $env:ARTIFACT_ZIP"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ env.ARTIFACT_ZIP }}
+          retention-days: 14
 
       - name: Compute next integer tag (vN)
         id: nexttag
@@ -67,7 +153,11 @@ jobs:
           tag_name: ${{ steps.nexttag.outputs.next }}
           name: Release ${{ steps.nexttag.outputs.next }}
           body: |
-            Automated build from ${{ github.sha }} on branch ${{ github.ref_name }}.
+            Automated build from commit ${{ github.sha }} on branch ${{ github.ref_name }}.
+            
+            This release includes:
+            - Methodic.Acetone binaries (.NET Framework 4.8.1)
+            - Unit test results (see artifacts)
           files: |
             ${{ env.ARTIFACT_ZIP }}
         env:
