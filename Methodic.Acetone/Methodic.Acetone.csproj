@@ -1,76 +1,58 @@
 <?xml version="1.0" encoding="utf-8"?>
-<Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" Condition="Exists('$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props')" />
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
-    <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProjectGuid>{1EEED1D5-2B13-4936-B208-FB5E612E8493}</ProjectGuid>
+    <TargetFramework>net481</TargetFramework>
     <OutputType>Library</OutputType>
-    <AppDesignerFolder>Properties</AppDesignerFolder>
-    <RootNamespace>Methodic.Acetone</RootNamespace>
     <AssemblyName>Methodic.Acetone</AssemblyName>
-    <TargetFrameworkVersion>v4.8.1</TargetFrameworkVersion>
-    <FileAlignment>512</FileAlignment>
+    <RootNamespace>Methodic.Acetone</RootNamespace>
     <Deterministic>true</Deterministic>
     <LangVersion>7.3</LangVersion>
-  </PropertyGroup>
-  <PropertyGroup>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <ImplicitUsings>disable</ImplicitUsings>
     <SignAssembly>true</SignAssembly>
     <AssemblyOriginatorKeyFile>Methodic.Acetone.snk</AssemblyOriginatorKeyFile>
+    <Platforms>AnyCPU;x64</Platforms>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'">
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|AnyCPU'">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
     <Optimize>false</Optimize>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Platform)' == 'AnyCPU'">
-    <PlatformTarget>x64</PlatformTarget>
     <OutputPath>bin\$(Configuration)\</OutputPath>
-    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Platform)' == 'x64'">
-    <PlatformTarget>x64</PlatformTarget>
+
+  <PropertyGroup Condition="'$(Platform)'=='x64'">
     <OutputPath>bin\x64\$(Configuration)\</OutputPath>
-    <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
+
   <ItemGroup>
     <Reference Include="Microsoft.Web.Iis.Rewrite">
       <HintPath>..\Reference Assemblies\Microsoft\IIS\Microsoft.Web.Iis.Rewrite.dll</HintPath>
-      <SpecificVersion>False</SpecificVersion>
+      <SpecificVersion>false</SpecificVersion>
     </Reference>
-    <Reference Include="System" />
-    <Reference Include="System.Core" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="ApplicationNameLocation.cs" />
-    <Compile Include="CredentialsType.cs" />
-    <Compile Include="EndpointAddressObject.cs" />
-    <Compile Include="ILogger.cs" />
-    <Compile Include="IServiceUrlResolver.cs" />
-    <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="ServiceFabricLocator.cs" />
-    <Compile Include="ServiceFabricUrlParser.cs" />
-    <Compile Include="ServiceFabricUrlResolver.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="app.config" />
-    <None Include="Methodic.Acetone.snk" />
-  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.ServiceFabric" Version="11.2.274" />
     <PackageReference Include="Microsoft.ServiceFabric.Services" Version="8.2.274" />
     <PackageReference Include="System.Memory" Version="4.6.3" />
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
   </ItemGroup>
-  <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+
+  <ItemGroup>
+    <None Include="app.config" />
+    <None Include="Methodic.Acetone.snk" />
+  </ItemGroup>
 </Project>

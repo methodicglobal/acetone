@@ -1,22 +1,27 @@
-name: Build & Release (.NET Framework 4.8)
+name: Build, Test & Release (.NET Framework 4.8.1)
 
 on:
   push:
-    branches: [ main ]   # change if your default branch differs
-  workflow_dispatch: { }
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch: {}
 
 permissions:
-  contents: write   # needed to create tags/releases
+  contents: write
   actions: read
+  packages: write
 
 jobs:
   build_and_test:
     runs-on: windows-latest
     env:
-      SOLUTION_FILE: Methodic.Acetone.sln
+      SOLUTION_FILE: Methodic.Acetone.CoreOnly.sln
       BUILD_CONFIGURATION: Release
+      TEST_PROJECT: Methodic.Acetone.Tests/Methodic.Acetone.Tests.csproj
       ARTIFACT_NAME: acetone-net481
       ARTIFACT_ZIP: acetone-net481.zip
+      PACKAGE_FRAMEWORK: net481
 
     steps:
       - name: Checkout (with tags)
@@ -24,77 +29,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v2
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 9.0.x
+          include-prerelease: true
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\NuGet\Cache
+            ~\.nuget\packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.sln', '**/*.csproj', '**/packages.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
       - name: Restore
-        run: nuget restore "$env:SOLUTION_FILE"
+        run: dotnet restore "$env:SOLUTION_FILE"
 
-      - name: Build (MSBuild)
-        run: msbuild "$env:SOLUTION_FILE" /p:Configuration=$env:BUILD_CONFIGURATION /m
-
-      # Discover and run unit tests
-      - name: Discover test assemblies
-        id: test-discovery
-        shell: pwsh
-        run: |
-          # Find test DLLs ending with Tests.dll under bin/Release (excluding infrastructure DLLs)
-          $testAssemblies = Get-ChildItem -Path . -Recurse -Filter "*Tests.dll" | 
-            Where-Object { 
-              $_.FullName -match "\\bin\\.*\\$env:BUILD_CONFIGURATION\\" -and
-              $_.Name -notmatch "TestAdapter|TestHost|TestPlatform"
-            } | Select-Object -ExpandProperty FullName
-
-          if (-not $testAssemblies -or $testAssemblies.Count -eq 0) {
-            Write-Warning "No test assemblies found matching *Tests.dll in bin/$env:BUILD_CONFIGURATION. Skipping test execution."
-            # Optionally, you could set an output or environment variable here to skip the test step.
-          }
-
-          Write-Host "Found test assemblies:"
-          $testAssemblies | ForEach-Object { Write-Host "  $_" }
-          
-          # Save test assemblies for next step (as multi-line string)
-          $testAssemblies -join "`n" | Out-File -FilePath "$env:RUNNER_TEMP\test-assemblies.txt" -Encoding utf8
+      - name: Build
+        run: dotnet build "$env:SOLUTION_FILE" -c $env:BUILD_CONFIGURATION --no-restore
 
       - name: Run unit tests
         shell: pwsh
         run: |
-          $testAssemblies = Get-Content "$env:RUNNER_TEMP\test-assemblies.txt"
-          
-          # Create output directory for TRX files
-          $trxOutputDir = "$env:RUNNER_TEMP\TestResults"
-          New-Item -ItemType Directory -Force -Path $trxOutputDir | Out-Null
+          $testResultsDir = Join-Path $env:RUNNER_TEMP "TestResults"
+          New-Item -ItemType Directory -Force -Path $testResultsDir | Out-Null
 
-          # Find vstest.console.exe
-          $vstestPath = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
-            -latest -products * -requires Microsoft.VisualStudio.Component.ManagedDesktop.Core `
-            -find "Common7\IDE\CommonExtensions\Microsoft\TestWindow\vstest.console.exe"
-
-          if (-not $vstestPath -or -not (Test-Path $vstestPath)) {
-            Write-Error "vstest.console.exe not found"
-            exit 1
+          dotnet test $env:TEST_PROJECT -c $env:BUILD_CONFIGURATION -p:Platform=x64 --no-build --logger "trx;LogFileName=Methodic.Acetone.Tests.trx" --results-directory "$testResultsDir"
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
           }
-
-          Write-Host "Using vstest.console.exe: $vstestPath"
-
-          # Run tests for each assembly
-          foreach ($assembly in $testAssemblies) {
-            $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assembly)
-            $trxFile = Join-Path $trxOutputDir "$assemblyName.trx"
-            
-            Write-Host "Running tests in: $assemblyName"
-            & $vstestPath $assembly /Logger:"trx;LogFileName=$trxFile" /Platform:x64
-            
-            if ($LASTEXITCODE -ne 0) {
-              Write-Error "Tests failed in $assemblyName"
-              exit $LASTEXITCODE
-            }
-          }
-
-          Write-Host "All tests passed successfully"
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -104,12 +73,11 @@ jobs:
           path: ${{ runner.temp }}/TestResults/*.trx
           retention-days: 14
 
-      # Package the main library output (adjust if you want tests or extras)
-      - name: Package build output
+      - name: Package build output (binary)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
-          # Verify the Methodic.Acetone output path exists
-          $acetoneOutput = ".\Methodic.Acetone\bin\$env:BUILD_CONFIGURATION"
+          $acetoneOutput = Join-Path ".\Methodic.Acetone\bin" "$env:BUILD_CONFIGURATION\$env:PACKAGE_FRAMEWORK"
           if (-not (Test-Path $acetoneOutput)) {
             Write-Error "Expected build output path not found: $acetoneOutput"
             exit 1
@@ -117,22 +85,52 @@ jobs:
 
           $out = Join-Path $env:RUNNER_TEMP $env:ARTIFACT_NAME
           New-Item -Force -ItemType Directory -Path $out | Out-Null
-          
-          # Package ONLY Methodic.Acetone project binaries
           Copy-Item -Recurse -Force "$acetoneOutput\*" $out
-          
-          Write-Host "Packaged files:"
-          Get-ChildItem -Recurse $out | Select-Object FullName | ForEach-Object { Write-Host "  $($_.FullName)" }
-          
+
           Compress-Archive -Path "$out\*" -DestinationPath "$env:ARTIFACT_ZIP" -Force
           Write-Host "Created archive: $env:ARTIFACT_ZIP"
 
-      - name: Upload binary artifact
+      - name: Create NuGet package (.nuspec)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: pwsh
+        run: |
+          $version = (git describe --tags --abbrev=0 2>$null) -replace '^v',''
+          if (-not $version) { $version = "0.1.0" }
+          $semantic = "$version"
+          Write-Host "Packing version $semantic"
+          nuget pack Methodic.Acetone.nuspec -Version $semantic -OutputDirectory "$env:RUNNER_TEMP" -Properties "Configuration=$env:BUILD_CONFIGURATION"
+          if ($LASTEXITCODE -ne 0) { Write-Error "nuget pack failed"; exit 1 }
+          Get-ChildItem "$env:RUNNER_TEMP" -Filter "Methodic.Acetone.*.nupkg" | ForEach-Object { Write-Host "Created package: $_" }
+
+      - name: Upload release artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: ${{ env.ARTIFACT_ZIP }}
+          path: |
+            ${{ env.ARTIFACT_ZIP }}
+            ${{ runner.temp }}/Methodic.Acetone.*.nupkg
           retention-days: 14
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build_and_test
+    runs-on: windows-latest
+    env:
+      ARTIFACT_NAME: acetone-net481
+      ARTIFACT_ZIP: acetone-net481.zip
+
+    steps:
+      - name: Checkout (with tags)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: release
 
       - name: Compute next integer tag (vN)
         id: nexttag
@@ -140,11 +138,7 @@ jobs:
         run: |
           git fetch --tags --force
           $tags = (git tag --list "v*" | Where-Object { $_ -match '^v\d+$' }) | ForEach-Object { $_.Trim() }
-          if (-not $tags -or $tags.Count -eq 0) { $next = 1 }
-          else {
-            $max = ($tags | ForEach-Object { [int]($_ -replace '^v','') } | Measure-Object -Maximum).Maximum
-            $next = [int]$max + 1
-          }
+          if (-not $tags -or $tags.Count -eq 0) { $next = 1 } else { $max = ($tags | ForEach-Object { [int]($_ -replace '^v','') } | Measure-Object -Maximum).Maximum; $next = [int]$max + 1 }
           "next=v$next" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Create GitHub Release
@@ -154,11 +148,13 @@ jobs:
           name: Release ${{ steps.nexttag.outputs.next }}
           body: |
             Automated build from commit ${{ github.sha }} on branch ${{ github.ref_name }}.
-            
+
             This release includes:
             - Methodic.Acetone binaries (.NET Framework 4.8.1)
+            - NuGet package
             - Unit test results (see artifacts)
           files: |
-            ${{ env.ARTIFACT_ZIP }}
+            release/${{ env.ARTIFACT_ZIP }}
+            release/Methodic.Acetone.*.nupkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

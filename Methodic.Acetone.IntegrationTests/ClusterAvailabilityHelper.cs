@@ -1,0 +1,62 @@
+using System;
+using System.Net.Sockets;
+
+namespace Methodic.Acetone.IntegrationTests
+{
+    public static class ClusterAvailabilityHelper
+    {
+        private static bool? _isClusterAvailable;
+        private static readonly object _lock = new object();
+
+        public static bool IsClusterAvailable(string clusterEndpoint = "localhost", int port = 19000, int timeoutMs = 1000)
+        {
+            lock (_lock)
+            {
+                if (_isClusterAvailable.HasValue)
+                {
+                    return _isClusterAvailable.Value;
+                }
+                _isClusterAvailable = CheckClusterConnection(clusterEndpoint, port, timeoutMs);
+                return _isClusterAvailable.Value;
+            }
+        }
+
+        private static bool CheckClusterConnection(string host, int port, int timeoutMs)
+        {
+            try
+            {
+                using (var client = new TcpClient())
+                {
+                    var result = client.BeginConnect(host, port, null, null);
+                    var success = result.AsyncWaitHandle.WaitOne(TimeSpan.FromMilliseconds(timeoutMs));
+                    if (!success)
+                    {
+                        return false;
+                    }
+                    client.EndConnect(result);
+                    return client.Connected;
+                }
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        public static void ResetCache()
+        {
+            lock (_lock)
+            {
+                _isClusterAvailable = null;
+            }
+        }
+
+        public static string GetAvailabilityMessage()
+        {
+            bool isAvailable = IsClusterAvailable();
+            return isAvailable
+                ? "? Service Fabric cluster detected - running tests against real cluster"
+                : "? Service Fabric cluster not available - using mock data";
+        }
+    }
+}

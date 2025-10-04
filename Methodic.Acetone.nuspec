@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Methodic.Acetone</id>
+    <version>$version$</version>
+    <title>Methodic Acetone Service Fabric Resolver</title>
+    <summary>Low-latency Service Fabric URL resolver and IIS rewrite provider for fintech-grade reverse proxy routing.</summary>
+    <description><![CDATA[
+Acetone turns friendly hostnames (including pull-request preview URLs) into live Service Fabric service endpoints at runtime. It is built for regulated fintech environments that need deterministic routing, normalised PR naming conventions, robust caching and explicit error semantics without sacrificing performance.
+
+Key capabilities:
+- Application and service discovery with partition endpoint resolution.
+- Pull-request preview URL normalisation that maps `service-1234` → `Service-PR1234`.
+- Resilient caching model with configurable invalidation for high-throughput reverse proxies.
+- Pure library dependency for IIS URL Rewrite providers, embeddable in other .NET 4.8.1 workloads.
+
+See the included readme (`docs/nuget-readme.md`) or project site for configuration examples and integration guidance.
+    ]]></description>
+    <authors>Methodic Global</authors>
+    <owners>Methodic Global</owners>
+    <language>en-US</language>
+    <requireLicenseAcceptance>false</requireLicenseAcceptance>
+    <license type="expression">MIT</license>
+    <projectUrl>https://github.com/methodicglobal/acetone</projectUrl>
+    <repository type="git" url="https://github.com/methodicglobal/acetone" branch="main" />
+    <readme>docs/nuget-readme.md</readme>
+    <releaseNotes>See https://github.com/methodicglobal/acetone/releases for the complete changelog.</releaseNotes>
+    <tags>service-fabric reverse-proxy rewrite url-resolution fintech caching iis</tags>
+    <copyright>Copyright © Methodic Global Pty Ltd</copyright>
+    <serviceable>false</serviceable>
+    <dependencies>
+      <group targetFramework=".NETFramework4.8.1">
+        <dependency id="Microsoft.ServiceFabric" version="11.2.274" />
+        <dependency id="Microsoft.ServiceFabric.Services" version="8.2.274" />
+        <dependency id="System.Memory" version="4.6.3" />
+        <dependency id="System.Runtime.CompilerServices.Unsafe" version="6.1.2" />
+      </group>
+    </dependencies>
+  </metadata>
+  <files>
+    <file src="Methodic.Acetone\bin\$configuration$\net481\Methodic.Acetone.dll" target="lib\net481" />
+    <file src="Methodic.Acetone\bin\$configuration$\net481\Methodic.Acetone.pdb" target="lib\net481" />
+    <file src="LICENSE*" target="" />
+    <file src="README*" target="" />
+    <file src="docs\nuget-readme.md" target="docs" />
+  </files>
+</package>
