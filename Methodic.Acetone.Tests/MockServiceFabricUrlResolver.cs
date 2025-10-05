@@ -99,7 +99,20 @@ namespace Methodic.Acetone.Tests
 			logger.WriteEntry($"[MOCK] Resolving service URI for application: {applicationName}, invocationId: {invocationId}", LogEntryType.Informational);
 			await Task.Delay(1);
 			if (string.IsNullOrWhiteSpace(applicationName)) throw new ArgumentException("Application name cannot be null or empty", nameof(applicationName));
+
+			// Direct lookup first
 			if (!applications.TryGetValue(applicationName, out var app))
+			{
+				// Fallback: treat underscores and hyphens as interchangeable (mirrors production normalization)
+				string alt1 = applicationName.Contains('-') ? applicationName.Replace('-', '_') : applicationName.Replace('_', '-');
+				applications.TryGetValue(alt1, out app);
+				if (app != null)
+				{
+					logger.WriteEntry($"[MOCK] Resolved application '{applicationName}' via underscore/hyphen fallback to '{alt1}'", LogEntryType.Warning);
+				}
+			}
+
+			if (app == null)
 			{
 				string error = $"No matching application with name '{applicationName}' could be found on cluster {clusterEndpoint}. Available applications: {string.Join(", ", applications.Keys)}";
 				logger.WriteEntry(error, LogEntryType.Error);
@@ -132,7 +145,7 @@ namespace Methodic.Acetone.Tests
 				string serviceName = $"Service{service}";
 				foreach (string prNumber in prNumbers)
 				{
-					string prAppName = $"{serviceName}-PR{prNumber}";
+					string prAppName = $"Service{service}-PR{prNumber}"; // hyphen form
 					string prEndpoint = $"https://service{service.ToString().ToLower()}-{prNumber}.pav.meth.wtf";
 					AddMockApplication(prAppName, prEndpoint, isPullRequest: true);
 				}

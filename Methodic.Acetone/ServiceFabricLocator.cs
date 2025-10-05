@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions; // added for sanitization regex
 
 namespace Methodic.Acetone
 {
@@ -318,7 +319,6 @@ namespace Methodic.Acetone
 
 			string result;
 
-
 			this.Logger.WriteEntry($"Methodic Acetone Rewrite called for url {value}, invocation {invocationId}", LogEntryType.Informational);
 
 			// Distinguish between null and empty/whitespace to satisfy test expectations
@@ -336,6 +336,10 @@ namespace Methodic.Acetone
 				throw new ArgumentException(messageEmpty, nameof(value));
 			}
 
+			// Sanitize malformed value first (added fix for extra colon + IPv6 tail scenario)
+			string originalValue = value;
+			value = SanitizeIncomingUrl(value, invocationId);
+
 			// Heuristic validation: reject single-label hosts (no dots) unless explicitly localhost or an IP (v4/v6)
 			bool containsDot = value.Contains('.') || value.Contains(':'); // ':' may appear in scheme or port/IPv6
 			bool isLocalHost = value.StartsWith("localhost", StringComparison.OrdinalIgnoreCase) || value.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase) || value.StartsWith("https://localhost", StringComparison.OrdinalIgnoreCase);
@@ -349,21 +353,25 @@ namespace Methodic.Acetone
 
 			if (!ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(value, this.ApplicationNameLocation, out string applicationName))
 			{
-				string message = $"Supplied URL of {value} has no resolvable application name";
-				this.Logger.WriteEntry(message, LogEntryType.Error);
-				throw new ArgumentException(message, nameof(value));
+				// If first attempt fails and original differed, try once more with original *without* path noise.
+				if (!string.Equals(originalValue, value, StringComparison.Ordinal) && ServiceFabricUrlResolver.TryGetApplicationNameFromUrl(originalValue, this.ApplicationNameLocation, out applicationName))
+				{
+					this.Logger.WriteEntry($"Application name resolved only after fallback using original value. Invocation {invocationId}", LogEntryType.Warning);
+				}
+				else
+				{
+					string message = $"Supplied URL of {originalValue} has no resolvable application name";
+					this.Logger.WriteEntry(message, LogEntryType.Error);
+					throw new ArgumentException(message, nameof(value));
+				}
 			}
 
-
 			this.Logger.WriteEntry($"Determined application name to be {applicationName}, invocation {invocationId}", LogEntryType.Informational);
-
 
 			if (value.ToLowerInvariant().Contains("/function/"))
 			{
 				result = this.ServiceUrlResolver.ResolveFunctionUri(applicationName, invocationId).GetAwaiter().GetResult();
-
 				this.Logger.WriteEntry($"Final result returning is {result}, invocation {invocationId}", LogEntryType.Informational);
-
 			}
 			else
 			{
@@ -371,13 +379,79 @@ namespace Methodic.Acetone
 				this.Logger.WriteEntry($"Final result returning is {result}, invocation {invocationId}", LogEntryType.Informational);
 			}
 
-			
-
-
-
 			stopwatch.Stop();
 			this.Logger.WriteEntry($"Time taken was {stopwatch.ElapsedMilliseconds} ms, invocation {invocationId}", LogEntryType.Informational);
 			return result;
+		}
+
+		private static readonly Regex MalformedDualPortIpv6TailPattern = new Regex(@"^(https?://[^/]+?:\d{2,5}):[0-9a-fA-F:]+(/.*)?$", RegexOptions.Compiled);
+		private static readonly Regex ExtraColonHostPattern = new Regex(@"^(https?://[^/]+?)(:[0-9a-fA-F:]{5,})(/.*)?$", RegexOptions.Compiled);
+
+		private string SanitizeIncomingUrl(string value, Guid invocationId)
+		{
+			// Fast path: if Uri parses OK and host looks normal (max one ':' after scheme unless IPv6 in brackets) just return
+			Uri temp;
+			if (Uri.TryCreate(value, UriKind.Absolute, out temp))
+			{
+				return value; // already good
+			}
+
+			string candidate = value;
+
+			// Case 1: pattern like https://host:443:ipv6tail -> keep first group + optional path
+			var m1 = MalformedDualPortIpv6TailPattern.Match(value);
+			if (m1.Success)
+			{
+				candidate = m1.Groups[1].Value + "/"; // enforce trailing slash for Uri parse
+				if (Uri.TryCreate(candidate, UriKind.Absolute, out temp))
+				{
+					this.Logger.WriteEntry($"Sanitised malformed URL (dual port + IPv6 tail) '{value}' -> '{candidate}' Invocation {invocationId}", LogEntryType.Warning);
+					return candidate;
+				}
+			}
+
+			// Case 2: generic extra colon garbage after host:port
+			var m2 = ExtraColonHostPattern.Match(value);
+			if (m2.Success)
+			{
+				// Take only the first group (base) and attempt parse (append '/' if missing)
+				candidate = m2.Groups[1].Value;
+				if (!candidate.EndsWith("/"))
+				{
+					candidate += "/";
+				}
+				if (Uri.TryCreate(candidate, UriKind.Absolute, out temp))
+				{
+					this.Logger.WriteEntry($"Sanitised malformed URL (extra colon host data) '{value}' -> '{candidate}' Invocation {invocationId}", LogEntryType.Warning);
+					return candidate;
+				}
+			}
+
+			// Final fallback: attempt to trim everything after the second colon following scheme
+			int schemeIdx = value.IndexOf("://", StringComparison.Ordinal);
+			if (schemeIdx > -1)
+			{
+				int hostStart = schemeIdx + 3;
+				int firstSlash = value.IndexOf('/', hostStart);
+				string hostPort = firstSlash > -1 ? value.Substring(0, firstSlash) : value;
+				int firstColon = hostPort.IndexOf(':', hostStart);
+				if (firstColon > -1)
+				{
+					int secondColon = hostPort.IndexOf(':', firstColon + 1);
+					if (secondColon > -1)
+					{
+						candidate = hostPort.Substring(0, secondColon) + "/";
+						if (Uri.TryCreate(candidate, UriKind.Absolute, out temp))
+						{
+							this.Logger.WriteEntry($"Sanitised malformed URL (trim after second colon) '{value}' -> '{candidate}' Invocation {invocationId}", LogEntryType.Warning);
+							return candidate;
+						}
+					}
+				}
+			}
+
+			// Could not sanitise; return original (will fail later producing original error semantics)
+			return value;
 		}
 
 		public static string FormatException(Exception ex)
