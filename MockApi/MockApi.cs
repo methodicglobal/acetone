@@ -82,11 +82,11 @@ namespace MockApi
         /// Development: returns ASP.NET Core dev cert.
         /// Non-development: tries thumbprint (ACETONE_CERT_THUMBPRINT) then subject (ACETONE_CERT_SUBJECT). Returns null if none found.
         /// </summary>
-        private static X509Certificate2 GetCertificateFromStore()
+        private static X509Certificate2? GetCertificateFromStore()
         {
             try
             {
-                string env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                string? env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
                 if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
                 {
                     // Match original logic: dev cert by OID + issuer CN=localhost (standard ASP.NET dev cert pattern)
@@ -101,7 +101,7 @@ namespace MockApi
                 }
 
                 // Non-dev (or dev fallback): check explicit thumbprint
-                string thumbprint = Environment.GetEnvironmentVariable("ACETONE_CERT_THUMBPRINT");
+                string? thumbprint = Environment.GetEnvironmentVariable("ACETONE_CERT_THUMBPRINT");
                 if (!string.IsNullOrWhiteSpace(thumbprint))
                 {
                     var cert = FindCertificateByThumbprint(thumbprint);
@@ -109,7 +109,7 @@ namespace MockApi
                 }
 
                 // Subject search
-                string subject = Environment.GetEnvironmentVariable("ACETONE_CERT_SUBJECT");
+                string? subject = Environment.GetEnvironmentVariable("ACETONE_CERT_SUBJECT");
                 if (!string.IsNullOrWhiteSpace(subject))
                 {
                     var cert = FindCertificateBySubject(subject);
@@ -118,16 +118,16 @@ namespace MockApi
             }
             catch
             {
-                // Swallow – fallback to HTTP
+                // Swallow ï¿½ fallback to HTTP
             }
             return null; // Will run HTTP only
         }
 
-        private static X509Certificate2 FindCertificateByThumbprint(string thumbprint)
+        private static X509Certificate2? FindCertificateByThumbprint(string thumbprint)
         {
             if (string.IsNullOrWhiteSpace(thumbprint)) return null;
             string normalised = thumbprint.Replace(" ", string.Empty).ToUpperInvariant();
-            X509Certificate2 match = null;
+            X509Certificate2? match = null;
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {
                 try
@@ -149,10 +149,10 @@ namespace MockApi
             return match;
         }
 
-        private static X509Certificate2 FindCertificateBySubject(string subject)
+        private static X509Certificate2? FindCertificateBySubject(string subject)
         {
             if (string.IsNullOrWhiteSpace(subject)) return null;
-            X509Certificate2 match = null;
+            X509Certificate2? match = null;
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {
                 try
@@ -162,7 +162,8 @@ namespace MockApi
                         store.Open(OpenFlags.ReadOnly);
                         foreach (var cert in store.Certificates)
                         {
-                            if (cert.Subject.IndexOf(subject, StringComparison.OrdinalIgnoreCase) >= 0)
+                            var certSubject = cert.Subject;
+                            if (!string.IsNullOrEmpty(certSubject) && certSubject.IndexOf(subject, StringComparison.OrdinalIgnoreCase) >= 0)
                             {
                                 if (match == null || cert.NotBefore > match.NotBefore) match = cert;
                             }
@@ -174,7 +175,7 @@ namespace MockApi
             return match;
         }
 
-        private static X509Certificate2 FindFirst(Func<X509Certificate2Collection, X509Certificate2Collection> selector)
+        private static X509Certificate2? FindFirst(Func<X509Certificate2Collection, X509Certificate2Collection?> selector)
         {
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {

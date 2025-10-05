@@ -81,11 +81,11 @@ namespace MockService
         /// Finds the ASP .NET Core HTTPS development certificate in development environment. Update this method to use the appropriate certificate for production environment.
         /// </summary>
         /// <returns>Returns the ASP .NET Core HTTPS development certificate</returns>
-        private static X509Certificate2 GetCertificateFromStore()
+        private static X509Certificate2? GetCertificateFromStore()
         {
             try
             {
-                string env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+                string? env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
                 if (string.Equals(env, "Development", StringComparison.OrdinalIgnoreCase))
                 {
                     const string aspNetHttpsOid = "1.3.6.1.4.1.311.84.1.1";
@@ -98,14 +98,14 @@ namespace MockService
                     if (cert != null) return cert;
                 }
 
-                string thumbprint = Environment.GetEnvironmentVariable("ACETONE_CERT_THUMBPRINT");
+                string? thumbprint = Environment.GetEnvironmentVariable("ACETONE_CERT_THUMBPRINT");
                 if (!string.IsNullOrWhiteSpace(thumbprint))
                 {
                     var cert = FindCertificateByThumbprint(thumbprint);
                     if (cert != null) return cert;
                 }
 
-                string subject = Environment.GetEnvironmentVariable("ACETONE_CERT_SUBJECT");
+                string? subject = Environment.GetEnvironmentVariable("ACETONE_CERT_SUBJECT");
                 if (!string.IsNullOrWhiteSpace(subject))
                 {
                     var cert = FindCertificateBySubject(subject);
@@ -116,11 +116,11 @@ namespace MockService
             return null;
         }
 
-        private static X509Certificate2 FindCertificateByThumbprint(string thumbprint)
+        private static X509Certificate2? FindCertificateByThumbprint(string thumbprint)
         {
             if (string.IsNullOrWhiteSpace(thumbprint)) return null;
             string normalized = thumbprint.Replace(" ", string.Empty).ToUpperInvariant();
-            X509Certificate2 match = null;
+            X509Certificate2? match = null;
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {
                 try
@@ -142,10 +142,10 @@ namespace MockService
             return match;
         }
 
-        private static X509Certificate2 FindCertificateBySubject(string subject)
+        private static X509Certificate2? FindCertificateBySubject(string subject)
         {
             if (string.IsNullOrWhiteSpace(subject)) return null;
-            X509Certificate2 match = null;
+            X509Certificate2? match = null;
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {
                 try
@@ -155,7 +155,8 @@ namespace MockService
                         store.Open(OpenFlags.ReadOnly);
                         foreach (var cert in store.Certificates)
                         {
-                            if (cert.Subject.IndexOf(subject, StringComparison.OrdinalIgnoreCase) >= 0)
+                            var certSubject = cert.Subject;
+                            if (!string.IsNullOrEmpty(certSubject) && certSubject.IndexOf(subject, StringComparison.OrdinalIgnoreCase) >= 0)
                             {
                                 if (match == null || cert.NotBefore > match.NotBefore) match = cert;
                             }
@@ -167,7 +168,7 @@ namespace MockService
             return match;
         }
 
-        private static X509Certificate2 FindFirst(Func<X509Certificate2Collection, X509Certificate2Collection> selector)
+        private static X509Certificate2? FindFirst(Func<X509Certificate2Collection, X509Certificate2Collection?> selector)
         {
             foreach (var location in new[] { StoreLocation.LocalMachine, StoreLocation.CurrentUser })
             {

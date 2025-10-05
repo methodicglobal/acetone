@@ -385,9 +385,9 @@ namespace Methodic.Acetone.Tests
 			return deployedApps;
 		}
 
-		public async Task<List<string>> DeployGuestExecutablesAsync(int count = 5)
+		public Task<List<string>> DeployGuestExecutablesAsync(int count = 5)
 		{
-			if (!IsClusterAvailable) return new List<string>();
+			if (!IsClusterAvailable) return Task.FromResult(new List<string>());
 			logger.WriteEntry($"🎯 Deploying {count} guest executable applications...", LogEntryType.Informational);
 			var deployedApps = new List<string>();
 			for (int i = 1; i <= count; i++)
@@ -396,7 +396,7 @@ namespace Methodic.Acetone.Tests
 				deployedApps.Add(appName); deployedApplications.Add(appName);
 				logger.WriteEntry($"  ✅ Deployed: {appName}", LogEntryType.Informational);
 			}
-			return deployedApps;
+			return Task.FromResult(deployedApps);
 		}
 
 		public async Task RemoveAllDeployedApplicationsAsync(bool unprovisionProvisionedTypes = false)

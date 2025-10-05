@@ -61,13 +61,21 @@ jobs:
           New-Item -ItemType Directory -Force -Path $testResultsDir | Out-Null
 
           dotnet test $env:TEST_PROJECT -c $env:BUILD_CONFIGURATION -p:Platform=x64 --no-build --logger "trx;LogFileName=Methodic.Acetone.Tests.trx" --results-directory "$testResultsDir"
-          if ($LASTEXITCODE -ne 0) {
-            exit $LASTEXITCODE
+
+          $exitCode = $LASTEXITCODE
+          if (-not (Get-ChildItem -Path $testResultsDir -Filter *.trx -ErrorAction SilentlyContinue)) {
+            Write-Warning "No TRX test result files were produced."
+          }
+
+          "TEST_RESULTS_DIR=$testResultsDir" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          if ($exitCode -ne 0) {
+            exit $exitCode
           }
 
       - name: Upload test results
+        if: always() && hashFiles(format('{0}/TestResults/*.trx', runner.temp)) != ''
         uses: actions/upload-artifact@v4
-        if: always()  # Upload results even if tests fail
         with:
           name: test-results-trx
           path: ${{ runner.temp }}/TestResults/*.trx
@@ -77,9 +85,25 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
-          $acetoneOutput = Join-Path ".\Methodic.Acetone\bin" "$env:BUILD_CONFIGURATION\$env:PACKAGE_FRAMEWORK"
-          if (-not (Test-Path $acetoneOutput)) {
-            Write-Error "Expected build output path not found: $acetoneOutput"
+          $configRoot = Join-Path ".\Methodic.Acetone\bin" $env:BUILD_CONFIGURATION
+          if (-not (Test-Path $configRoot)) {
+            Write-Error "Expected build configuration path not found: $configRoot"
+            exit 1
+          }
+
+          $candidate = Get-ChildItem -Path $configRoot -Directory | Where-Object {
+            Test-Path (Join-Path $_.FullName "Methodic.Acetone.dll")
+          } | Select-Object -First 1
+
+          if ($candidate) {
+            $acetoneOutput = $candidate.FullName
+          }
+          elseif (Test-Path (Join-Path $configRoot "Methodic.Acetone.dll")) {
+            $acetoneOutput = $configRoot
+          }
+          else {
+            Write-Error "Expected Methodic.Acetone build output not found under $configRoot"
+            Get-ChildItem -Path $configRoot -Recurse -Filter "Methodic.Acetone.dll" | ForEach-Object { Write-Host "Found candidate: $($_.FullName)" }
             exit 1
           }
 

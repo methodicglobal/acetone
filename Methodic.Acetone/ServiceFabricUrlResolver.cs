@@ -461,7 +461,16 @@ namespace Methodic.Acetone
 				value = value.Substring("fabric:".Length);
 			}
 
-			return value.Trim('/');
+			value = value.Trim('/');
+
+			// NEW: Treat underscores and hyphens as equivalent by normalising all underscores to hyphens.
+			// This allows clusters that deploy applications as Guard_PR12906 to match incoming PR pattern Guard-PR12906.
+			if (value.IndexOf('_') >= 0)
+			{
+				value = value.Replace('_', '-');
+			}
+
+			return value;
 		}
 
 		public async Task<string> ResolveFunctionUri(string applicationName, Guid invocationId, string version = null, bool refreshCache = false)
