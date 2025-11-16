@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Acetone.V2.Core/Acetone.V2.Core.csproj" />
+    <Project Path="src/Acetone.V2.Proxy/Acetone.V2.Proxy.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Acetone.V2.Core.Tests/Acetone.V2.Core.Tests.csproj" />
+    <Project Path="tests/Acetone.V2.IntegrationTests/Acetone.V2.IntegrationTests.csproj" />
+    <Project Path="tests/Acetone.V2.Proxy.Tests/Acetone.V2.Proxy.Tests.csproj" />
+  </Folder>
+</Solution>
