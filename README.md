@@ -2,6 +2,29 @@
 
 Acetone is a focused **open‑source fintech infrastructure component** that converts friendly hostnames (including pull‑request preview URLs) into live Service Fabric service endpoints at runtime. It ships as an IIS rewrite provider / helper library targeting **.NET Framework 4.8.1** with supporting mock & integration assets (some on **.NET 9**) to validate real‑world deployment and performance.
 
+## Deployment
+
+### Docker
+Build the Docker image:
+```bash
+docker build -f src/Acetone.V2.Proxy/Dockerfile -t acetone-proxy .
+```
+Run locally:
+```bash
+docker run -p 8080:8080 acetone-proxy
+```
+
+### Kubernetes
+Deploy using Helm:
+```bash
+helm install acetone-proxy ./charts/acetone-proxy
+```
+
+## Monitoring
+- Metrics are available at `/metrics` in Prometheus format.
+- Health checks are available at `/health/live` and `/health/ready`.
+- Distributed tracing is enabled via OpenTelemetry.
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![.NET Framework 4.8.1](https://img.shields.io/badge/.NET-4.8.1-blue.svg)](https://dotnet.microsoft.com/download/dotnet-framework)
 [![Service Fabric](https://img.shields.io/badge/Service%20Fabric-8.2.274-purple.svg)](https://learn.microsoft.com/azure/service-fabric/)

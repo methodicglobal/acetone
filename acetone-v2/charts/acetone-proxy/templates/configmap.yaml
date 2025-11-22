@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "acetone-proxy.fullname" . }}
+  labels:
+    {{- include "acetone-proxy.labels" . | nindent 4 }}
+data:
+  appsettings.json: |
+{{ .Values.config.appsettings | indent 4 }}
