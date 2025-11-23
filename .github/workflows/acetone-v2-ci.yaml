@@ -124,6 +124,25 @@ jobs:
           /p:DebugSymbols=false \
           -o out/${{ matrix.rid }}
 
+    - name: Copy deployment files
+      working-directory: acetone-v2
+      shell: bash
+      run: |
+        # Copy README and installer scripts to output directory
+        cp deployment/README.md out/${{ matrix.rid }}/
+        cp deployment/appsettings.example.json out/${{ matrix.rid }}/
+
+        if [[ "${{ matrix.rid }}" == "win-x64" ]]; then
+          cp deployment/install.ps1 out/${{ matrix.rid }}/
+          echo "Copied Windows installer"
+        else
+          cp deployment/install.sh out/${{ matrix.rid }}/
+          chmod +x out/${{ matrix.rid }}/install.sh
+          echo "Copied Linux installer and set executable permissions"
+        fi
+
+        ls -la out/${{ matrix.rid }}/
+
     - name: Create version info
       working-directory: acetone-v2/out/${{ matrix.rid }}
       shell: bash
