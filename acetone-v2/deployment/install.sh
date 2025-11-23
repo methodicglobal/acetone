@@ -21,6 +21,7 @@ SERVICE_USER="acetone"
 PORT=8080
 METRICS_PORT=9090
 START_SERVICE=false
+INSTALL_TRAY_APP=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -53,6 +54,10 @@ while [[ $# -gt 0 ]]; do
             START_SERVICE=true
             shift
             ;;
+        --install-tray-app)
+            INSTALL_TRAY_APP=true
+            shift
+            ;;
         --help)
             echo "Acetone V2 Proxy Installer for Linux"
             echo ""
@@ -66,11 +71,12 @@ while [[ $# -gt 0 ]]; do
             echo "  --port PORT            HTTP port (default: 8080)"
             echo "  --metrics-port PORT    Prometheus metrics port (default: 9090)"
             echo "  --start-service        Start service after installation"
+            echo "  --install-tray-app     Install system tray application and add to autostart"
             echo "  --help                 Show this help message"
             echo ""
             echo "Examples:"
             echo "  sudo ./install.sh"
-            echo "  sudo ./install.sh --create-service --start-service"
+            echo "  sudo ./install.sh --create-service --start-service --install-tray-app"
             echo "  sudo ./install.sh --install-dir /usr/local/acetone --port 80"
             exit 0
             ;;
@@ -309,7 +315,7 @@ EOF
         systemctl enable "$SERVICE_NAME"
         echo -e "${GREEN}  ✓ Service enabled (will start on boot)${NC}"
     else
-        echo -e "${GRAY}[6/7] Skipping service creation (use --create-service to enable)${NC}"
+        echo -e "${GRAY}[6/8] Skipping service creation (use --create-service to enable)${NC}"
     fi
 }
 
@@ -318,7 +324,7 @@ EOF
 ###############################################################################
 start_service() {
     if $CREATE_SERVICE && $START_SERVICE; then
-        echo -e "${YELLOW}[7/7] Starting service...${NC}"
+        echo -e "${YELLOW}[7/8] Starting service...${NC}"
 
         systemctl start "$SERVICE_NAME"
         sleep 2
@@ -330,9 +336,67 @@ start_service() {
             echo -e "${GRAY}  Check status with: systemctl status $SERVICE_NAME${NC}"
         fi
     elif $CREATE_SERVICE; then
-        echo -e "${GRAY}[7/7] Service created but not started (use --start-service to auto-start)${NC}"
+        echo -e "${GRAY}[7/8] Service created but not started (use --start-service to auto-start)${NC}"
     else
-        echo -e "${GRAY}[7/7] Skipping service start${NC}"
+        echo -e "${GRAY}[7/8] Skipping service start${NC}"
+    fi
+}
+
+###############################################################################
+# Function: Install tray application
+###############################################################################
+install_tray_application() {
+    if $INSTALL_TRAY_APP; then
+        echo -e "${YELLOW}[8/8] Installing system tray application...${NC}"
+
+        TRAY_EXE="$INSTALL_DIR/Acetone.TrayApp"
+
+        if [ ! -f "$TRAY_EXE" ]; then
+            echo -e "${YELLOW}  ⚠ Tray application not found: $TRAY_EXE${NC}"
+            echo -e "${GRAY}  ℹ Tray app may not be included in this package${NC}"
+            return 0
+        fi
+
+        # Ensure it's executable
+        chmod +x "$TRAY_EXE"
+
+        # Create autostart directory for current user (who ran sudo)
+        REAL_USER=$(who am i | awk '{print $1}')
+        REAL_HOME=$(eval echo ~$REAL_USER)
+        AUTOSTART_DIR="$REAL_HOME/.config/autostart"
+        DESKTOP_FILE="$AUTOSTART_DIR/acetone-tray.desktop"
+
+        mkdir -p "$AUTOSTART_DIR"
+
+        # Create desktop entry
+        cat > "$DESKTOP_FILE" << EOF
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Acetone V2 Proxy Manager
+Comment=System tray manager for Acetone V2 Proxy
+Exec=$TRAY_EXE
+Icon=$INSTALL_DIR/acetone-icon.png
+Terminal=false
+Categories=Network;System;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+EOF
+
+        chown $REAL_USER:$(id -gn $REAL_USER) "$DESKTOP_FILE"
+        chmod +x "$DESKTOP_FILE"
+
+        echo -e "${GREEN}  ✓ Added tray app to autostart: $DESKTOP_FILE${NC}"
+
+        # Ask if user wants to start it now
+        echo -n "  Start tray application now? (Y/n) "
+        read -r start_now
+        if [[ ! "$start_now" =~ ^[Nn]$ ]]; then
+            sudo -u $REAL_USER DISPLAY=:0 "$TRAY_EXE" &
+            echo -e "${GREEN}  ✓ Tray application started${NC}"
+        fi
+    else
+        echo -e "${GRAY}[8/8] Skipping tray app installation (use --install-tray-app to enable)${NC}"
     fi
 }
 
@@ -348,6 +412,7 @@ create_configuration
 configure_firewall
 create_systemd_service
 start_service
+install_tray_application
 
 # Success message
 echo ""

@@ -24,13 +24,16 @@
 .PARAMETER StartService
     If specified, starts the service after installation
 
+.PARAMETER InstallTrayApp
+    If specified, installs the system tray application and adds it to startup
+
 .EXAMPLE
     .\install.ps1
     Basic installation
 
 .EXAMPLE
-    .\install.ps1 -CreateService -StartService
-    Install and create Windows Service, then start it
+    .\install.ps1 -CreateService -StartService -InstallTrayApp
+    Install and create Windows Service, then start it, and install tray app
 
 .EXAMPLE
     .\install.ps1 -InstallLocation "D:\Apps\Acetone" -Port 80 -MetricsPort 9090
@@ -44,7 +47,8 @@ param(
     [string]$ServiceName = "AcetoneV2Proxy",
     [int]$Port = 8080,
     [int]$MetricsPort = 9090,
-    [switch]$StartService
+    [switch]$StartService,
+    [switch]$InstallTrayApp
 )
 
 # Requires Administrator
@@ -181,7 +185,7 @@ function Set-FirewallRules {
 
 # Function to create Windows Service
 function New-WindowsService {
-    Write-Host "[5/6] Creating Windows Service..." -ForegroundColor Yellow
+    Write-Host "[5/7] Creating Windows Service..." -ForegroundColor Yellow
 
     $exePath = Join-Path $InstallLocation "Acetone.V2.Proxy.exe"
 
@@ -237,7 +241,7 @@ function New-WindowsService {
 
 # Function to start service
 function Start-AcetoneService {
-    Write-Host "[6/6] Starting service..." -ForegroundColor Yellow
+    Write-Host "[6/7] Starting service..." -ForegroundColor Yellow
 
     try {
         Start-Service -Name $ServiceName
@@ -252,6 +256,48 @@ function Start-AcetoneService {
     } catch {
         Write-Error "Failed to start service: $_"
         Write-Host "  ℹ Check Event Viewer for details: eventvwr.msc" -ForegroundColor Yellow
+    }
+}
+
+# Function to install tray app
+function Install-TrayApplication {
+    Write-Host "[7/7] Installing system tray application..." -ForegroundColor Yellow
+
+    $trayExe = Join-Path $InstallLocation "Acetone.TrayApp.exe"
+
+    if (-not (Test-Path $trayExe)) {
+        Write-Warning "Tray application not found: $trayExe"
+        Write-Host "  ℹ Tray app may not be included in this package" -ForegroundColor Gray
+        return $false
+    }
+
+    # Create startup shortcut
+    $startupFolder = [System.IO.Path]::Combine(
+        [Environment]::GetFolderPath('Startup'),
+        "Acetone V2 Proxy.lnk"
+    )
+
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($startupFolder)
+        $shortcut.TargetPath = $trayExe
+        $shortcut.WorkingDirectory = $InstallLocation
+        $shortcut.Description = "Acetone V2 Proxy Manager"
+        $shortcut.Save()
+
+        Write-Host "  ✓ Added tray app to startup: $startupFolder" -ForegroundColor Green
+
+        # Optionally start it now
+        $start = Read-Host "  Start tray application now? (Y/n)"
+        if ($start -ne 'n') {
+            Start-Process -FilePath $trayExe -WorkingDirectory $InstallLocation
+            Write-Host "  ✓ Tray application started" -ForegroundColor Green
+        }
+
+        return $true
+    } catch {
+        Write-Warning "Failed to install tray app: $_"
+        return $false
     }
 }
 
@@ -277,15 +323,23 @@ try {
             Write-Warning "Service creation failed, but files were installed successfully"
         }
     } else {
-        Write-Host "[5/6] Skipping service creation (use -CreateService to enable)" -ForegroundColor Gray
-        Write-Host "[6/6] Skipping service start" -ForegroundColor Gray
+        Write-Host "[5/7] Skipping service creation (use -CreateService to enable)" -ForegroundColor Gray
+        Write-Host "[6/7] Skipping service start" -ForegroundColor Gray
+        Write-Host "[7/7] Skipping tray app install" -ForegroundColor Gray
     }
 
     # Step 6: Start Service (if requested and created)
     if ($CreateService -and $StartService) {
         Start-AcetoneService
     } elseif ($CreateService) {
-        Write-Host "[6/6] Service created but not started (use -StartService to auto-start)" -ForegroundColor Gray
+        Write-Host "[6/7] Service created but not started (use -StartService to auto-start)" -ForegroundColor Gray
+    }
+
+    # Step 7: Install Tray App (if requested)
+    if ($InstallTrayApp) {
+        Install-TrayApplication
+    } elseif (-not $InstallTrayApp -and $CreateService) {
+        Write-Host "[7/7] Skipping tray app installation (use -InstallTrayApp to enable)" -ForegroundColor Gray
     }
 
     # Success message
