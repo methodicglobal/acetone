@@ -381,15 +381,11 @@ public class ConfigurationManager
         }
 
         // 8. Check for default/insecure logging levels in production
-        if (configuration.Logging?.LogLevel != null)
+        if (configuration.Logging?.LogLevel != null &&
+            configuration.Logging.LogLevel.TryGetValue("Default", out var defaultLevel) &&
+            (defaultLevel == "Trace" || defaultLevel == "Debug"))
         {
-            if (configuration.Logging.LogLevel.TryGetValue("Default", out var defaultLevel))
-            {
-                if (defaultLevel == "Trace" || defaultLevel == "Debug")
-                {
-                    errors.Add("SECURITY WARNING: Default log level is 'Trace' or 'Debug'. These verbose levels may log sensitive data and should not be used in production.");
-                }
-            }
+            errors.Add("SECURITY WARNING: Default log level is 'Trace' or 'Debug'. These verbose levels may log sensitive data and should not be used in production.");
         }
 
         // 9. Validate destinations have appropriate health check paths
