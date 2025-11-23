@@ -393,12 +393,10 @@ public class ConfigurationManager
         {
             foreach (var (clusterId, cluster) in configuration.ReverseProxy.Clusters)
             {
-                if (cluster.HealthCheck?.Active?.Enabled == true)
+                if (cluster.HealthCheck?.Active?.Enabled == true &&
+                    string.IsNullOrWhiteSpace(cluster.HealthCheck.Active.Path))
                 {
-                    if (string.IsNullOrWhiteSpace(cluster.HealthCheck.Active.Path))
-                    {
-                        errors.Add($"SECURITY WARNING: Cluster '{clusterId}' has active health checks enabled but no path specified.");
-                    }
+                    errors.Add($"SECURITY WARNING: Cluster '{clusterId}' has active health checks enabled but no path specified.");
                 }
             }
         }
