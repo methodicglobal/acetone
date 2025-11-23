@@ -61,9 +61,13 @@ public class App : Application
 
             menu.Items.Add(new NativeMenuItemSeparator());
 
-            var configItem = new NativeMenuItem { Header = "Open Configuration" };
+            var configItem = new NativeMenuItem { Header = "Edit Configuration" };
             configItem.Click += (s, e) => OpenConfiguration();
             menu.Items.Add(configItem);
+
+            var validateConfigItem = new NativeMenuItem { Header = "Validate Configuration" };
+            validateConfigItem.Click += (s, e) => ValidateConfiguration();
+            menu.Items.Add(validateConfigItem);
 
             var logsItem = new NativeMenuItem { Header = "View Logs" };
             logsItem.Click += (s, e) => ViewLogs();
@@ -196,20 +200,48 @@ public class App : Application
         {
             var configPath = "/opt/acetone/appsettings.json";
 
-            // Try to find default text editor
-            var editors = new[] { "xdg-open", "gedit", "kate", "nano", "vi" };
+            if (!File.Exists(configPath))
+            {
+                ShowNotification($"Configuration file not found: {configPath}", "Error", true);
+                return;
+            }
 
-            foreach (var editor in editors)
+            // Try to find default text editor with GUI
+            var guiEditors = new[] { "gedit", "kate", "mousepad", "geany", "pluma" };
+
+            foreach (var editor in guiEditors)
             {
                 try
                 {
-                    Process.Start(new ProcessStartInfo
+                    var process = new Process
                     {
-                        FileName = editor,
-                        Arguments = configPath,
-                        UseShellExecute = false
-                    });
-                    return;
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = "which",
+                            Arguments = editor,
+                            RedirectStandardOutput = true,
+                            UseShellExecute = false,
+                            CreateNoWindow = true
+                        }
+                    };
+                    process.Start();
+                    process.WaitForExit();
+
+                    if (process.ExitCode == 0)
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = editor,
+                            Arguments = configPath,
+                            UseShellExecute = false
+                        });
+
+                        ShowNotification(
+                            "Configuration file opened in editor.\nValidate your changes before restarting the service.",
+                            "Configuration"
+                        );
+                        return;
+                    }
                 }
                 catch
                 {
@@ -217,11 +249,153 @@ public class App : Application
                 }
             }
 
-            ShowNotification("No text editor found", "Error", true);
+            // Fallback to xdg-open
+            try
+            {
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "xdg-open",
+                    Arguments = configPath,
+                    UseShellExecute = false
+                });
+
+                ShowNotification(
+                    "Configuration file opened.\nValidate your changes before restarting the service.",
+                    "Configuration"
+                );
+            }
+            catch
+            {
+                ShowNotification(
+                    $"Could not find a text editor. Please edit manually:\n{configPath}",
+                    "No Editor Found",
+                    true
+                );
+            }
         }
         catch (Exception ex)
         {
             ShowNotification($"Error opening configuration: {ex.Message}", "Error", true);
+        }
+    }
+
+    private void ValidateConfiguration()
+    {
+        try
+        {
+            var configPath = "/opt/acetone/appsettings.json";
+
+            if (!File.Exists(configPath))
+            {
+                ShowNotification($"Configuration file not found: {configPath}", "Error", true);
+                return;
+            }
+
+            // Read and parse JSON
+            var json = File.ReadAllText(configPath);
+            var errors = new List<string>();
+
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(json);
+                var root = doc.RootElement;
+
+                // Basic validation
+                if (root.TryGetProperty("Urls", out var urls))
+                {
+                    var urlString = urls.GetString();
+                    if (string.IsNullOrWhiteSpace(urlString))
+                    {
+                        errors.Add("Urls cannot be empty");
+                    }
+                    else
+                    {
+                        foreach (var url in urlString.Split(';'))
+                        {
+                            if (!Uri.TryCreate(url.Trim(), UriKind.Absolute, out _))
+                            {
+                                errors.Add($"Invalid URL: {url}");
+                            }
+                        }
+                    }
+                }
+
+                // Validate ReverseProxy if present
+                if (root.TryGetProperty("ReverseProxy", out var proxy))
+                {
+                    if (proxy.TryGetProperty("Routes", out var routes))
+                    {
+                        foreach (var route in routes.EnumerateObject())
+                        {
+                            if (route.Value.TryGetProperty("ClusterId", out var clusterId))
+                            {
+                                var clusterIdStr = clusterId.GetString();
+                                if (string.IsNullOrWhiteSpace(clusterIdStr))
+                                {
+                                    errors.Add($"Route '{route.Name}': ClusterId cannot be empty");
+                                }
+                            }
+                        }
+                    }
+
+                    if (proxy.TryGetProperty("Clusters", out var clusters))
+                    {
+                        foreach (var cluster in clusters.EnumerateObject())
+                        {
+                            if (cluster.Value.TryGetProperty("Destinations", out var destinations))
+                            {
+                                var destCount = 0;
+                                foreach (var dest in destinations.EnumerateObject())
+                                {
+                                    destCount++;
+                                    if (dest.Value.TryGetProperty("Address", out var address))
+                                    {
+                                        var addressStr = address.GetString();
+                                        if (string.IsNullOrWhiteSpace(addressStr))
+                                        {
+                                            errors.Add($"Cluster '{cluster.Name}': Destination '{dest.Name}' address cannot be empty");
+                                        }
+                                        else if (!Uri.TryCreate(addressStr, UriKind.Absolute, out _))
+                                        {
+                                            errors.Add($"Cluster '{cluster.Name}': Destination '{dest.Name}' has invalid address");
+                                        }
+                                    }
+                                }
+
+                                if (destCount == 0)
+                                {
+                                    errors.Add($"Cluster '{cluster.Name}': Must have at least one destination");
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (errors.Count == 0)
+                {
+                    ShowNotification(
+                        "Configuration is valid! ✓\nNo errors found.",
+                        "Validation Successful"
+                    );
+                }
+                else
+                {
+                    var errorMessage = $"Found {errors.Count} error(s):\\n" + string.Join("\\n", errors.Take(5));
+                    if (errors.Count > 5)
+                    {
+                        errorMessage += $"\\n...and {errors.Count - 5} more";
+                    }
+                    ShowNotification(errorMessage, "Validation Errors", true);
+                }
+            }
+            catch (System.Text.Json.JsonException jsonEx)
+            {
+                ShowNotification($"Invalid JSON format: {jsonEx.Message}", "JSON Error", true);
+            }
+        }
+        catch (Exception ex)
+        {
+            ShowNotification($"Validation error: {ex.Message}", "Error", true);
         }
     }
 

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.ServiceProcess;
+using Acetone.V2.TrayApp.Windows.Forms;
 
 namespace Acetone.V2.TrayApp.Windows;
 
@@ -76,7 +77,8 @@ public class TrayApplicationContext : ApplicationContext
         contextMenu.Items.Add(new ToolStripSeparator());
 
         // Configuration & Monitoring
-        contextMenu.Items.Add("Open Configuration", null, OnOpenConfiguration);
+        contextMenu.Items.Add("Configure...", null, OnConfigure);
+        contextMenu.Items.Add("Edit Config File", null, OnOpenConfiguration);
         contextMenu.Items.Add("View Logs", null, OnViewLogs);
         contextMenu.Items.Add("Health Check", null, OnHealthCheck);
         contextMenu.Items.Add("Metrics Dashboard", null, OnMetricsDashboard);
@@ -213,6 +215,53 @@ public class TrayApplicationContext : ApplicationContext
         {
             MessageBox.Show(
                 $"Failed to {commandName} service:\n\n{ex.Message}",
+                "Error",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error
+            );
+        }
+    }
+
+    private void OnConfigure(object? sender, EventArgs e)
+    {
+        var configPath = Path.Combine(_installPath, "appsettings.json");
+
+        if (!File.Exists(configPath))
+        {
+            MessageBox.Show(
+                $"Configuration file not found:\n{configPath}\n\nPlease ensure Acetone is properly installed.",
+                "File Not Found",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning
+            );
+            return;
+        }
+
+        try
+        {
+            using var configForm = new ConfigurationForm(configPath);
+            var result = configForm.ShowDialog();
+
+            if (result == DialogResult.OK)
+            {
+                // Configuration was saved, prompt to restart service
+                var restartResult = MessageBox.Show(
+                    "Configuration saved successfully!\n\nDo you want to restart the service now to apply changes?",
+                    "Restart Service?",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question
+                );
+
+                if (restartResult == DialogResult.Yes)
+                {
+                    OnRestartService(null, EventArgs.Empty);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Failed to open configuration dialog:\n\n{ex.Message}",
                 "Error",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error
