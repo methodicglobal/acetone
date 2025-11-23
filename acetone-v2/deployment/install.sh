@@ -396,7 +396,7 @@ EOF
             echo -e "${GREEN}  ✓ Tray application started${NC}"
         fi
     else
-        echo -e "${GRAY}[8/8] Skipping tray app installation (use --install-tray-app to enable)${NC}"
+        echo -e "${GRAY}[7/7] Skipping tray app installation (use --install-tray-app to enable)${NC}"
     fi
 }
 
