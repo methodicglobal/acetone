@@ -315,7 +315,7 @@ EOF
         systemctl enable "$SERVICE_NAME"
         echo -e "${GREEN}  ✓ Service enabled (will start on boot)${NC}"
     else
-        echo -e "${GRAY}[6/8] Skipping service creation (use --create-service to enable)${NC}"
+        echo -e "${GRAY}[6/7] Skipping service creation (use --create-service to enable)${NC}"
     fi
 }
 
