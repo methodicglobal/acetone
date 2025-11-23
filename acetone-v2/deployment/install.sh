@@ -347,7 +347,7 @@ start_service() {
 ###############################################################################
 install_tray_application() {
     if $INSTALL_TRAY_APP; then
-        echo -e "${YELLOW}[8/8] Installing system tray application...${NC}"
+        echo -e "${YELLOW}[7/7] Installing system tray application...${NC}"
 
         TRAY_EXE="$INSTALL_DIR/Acetone.TrayApp"
 
