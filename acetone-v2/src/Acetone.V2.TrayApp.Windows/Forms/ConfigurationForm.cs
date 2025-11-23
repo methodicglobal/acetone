@@ -7,7 +7,7 @@ public class ConfigurationForm : Form
 {
     private readonly string _configPath;
     private readonly SecureConfigurationManager _configManager;
-    private AcetoneConfiguration _configuration;
+    private readonly AcetoneConfiguration _configuration;
 
     private TabControl _tabControl;
     private Button _saveButton;
