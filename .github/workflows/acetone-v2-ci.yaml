@@ -124,6 +124,32 @@ jobs:
           /p:DebugSymbols=false \
           -o out/${{ matrix.rid }}
 
+    - name: Publish Windows Tray App
+      if: matrix.rid == 'win-x64'
+      working-directory: acetone-v2
+      run: |
+        dotnet publish src/Acetone.V2.TrayApp.Windows/Acetone.V2.TrayApp.Windows.csproj \
+          -c Release \
+          -r ${{ matrix.rid }} \
+          --self-contained false \
+          /p:PublishSingleFile=true \
+          /p:DebugType=None \
+          /p:DebugSymbols=false \
+          -o out/${{ matrix.rid }}/tray
+
+    - name: Publish Linux Tray App
+      if: matrix.rid == 'linux-x64'
+      working-directory: acetone-v2
+      run: |
+        dotnet publish src/Acetone.V2.TrayApp.Linux/Acetone.V2.TrayApp.Linux.csproj \
+          -c Release \
+          -r ${{ matrix.rid }} \
+          --self-contained false \
+          /p:PublishSingleFile=true \
+          /p:DebugType=None \
+          /p:DebugSymbols=false \
+          -o out/${{ matrix.rid }}/tray
+
     - name: Copy deployment files
       working-directory: acetone-v2
       shell: bash
@@ -134,14 +160,19 @@ jobs:
 
         if [[ "${{ matrix.rid }}" == "win-x64" ]]; then
           cp deployment/install.ps1 out/${{ matrix.rid }}/
-          echo "Copied Windows installer"
+          cp deployment/install-tray.ps1 out/${{ matrix.rid }}/
+          echo "Copied Windows installers"
         else
           cp deployment/install.sh out/${{ matrix.rid }}/
+          cp deployment/install-tray.sh out/${{ matrix.rid }}/
+          cp deployment/acetone-tray.desktop out/${{ matrix.rid }}/
           chmod +x out/${{ matrix.rid }}/install.sh
-          echo "Copied Linux installer and set executable permissions"
+          chmod +x out/${{ matrix.rid }}/install-tray.sh
+          echo "Copied Linux installers and desktop file, set executable permissions"
         fi
 
         ls -la out/${{ matrix.rid }}/
+        ls -la out/${{ matrix.rid }}/tray/
 
     - name: Create version info
       working-directory: acetone-v2/out/${{ matrix.rid }}
