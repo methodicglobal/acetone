@@ -1,0 +1,15 @@
+**/.dockerignore
+**/.env
+**/.git
+**/.gitignore
+**/.vs
+**/.vscode
+**/bin
+**/obj
+**/TestResults
+**/tests
+README.md
+ACETONE_V2_PLAN.md
+task.md
+implementation_plan.md
+walkthrough.md

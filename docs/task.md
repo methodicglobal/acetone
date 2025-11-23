@@ -1,0 +1,26 @@
+# Acetone V2 Implementation Tasks
+
+- [ ] Phase 1: Foundation & Core Library <!-- id: 0 -->
+    - [x] Step 1.1: Project Setup <!-- id: 1 -->
+    - [x] Step 1.2: Port Core URL Parsing Logic <!-- id: 2 -->
+    - [x] Step 1.3: Implement Configuration System <!-- id: 3 -->
+    - [x] Step 1.4: Implement Service Fabric Resolver
+    - [x] Step 1.5: Implement Three-Tier Caching <!-- id: 5 -->
+    - [x] Step 1.6: Implement Resilience Patterns <!-- id: 6 -->
+- [ ] Phase 2: YARP Integration & Proxy Service <!-- id: 7 -->
+    - [x] Step 2.1: Create YARP Proxy Project <!-- id: 8 -->
+    - [x] Step 2.2: Implement YARP Configuration Provider <!-- id: 9 -->
+    - [x] Step 2.3: Implement Service Fabric Routing Middleware <!-- id: 10 -->
+    - [x] Step 2.4: Implement YARP Transforms <!-- id: 11 -->
+    - [x] Step 2.5: Implement Health Checks <!-- id: 12 -->
+    - [x] Step 2.6: Implement Metrics & Observability <!-- id: 13 -->
+- [x] Phase 3: Testing & Quality Assurance <!-- id: 14 -->
+    - [x] Step 3.1: Unit Test Coverage <!-- id: 15 -->
+    - [x] Step 3.2: Integration Tests <!-- id: 16 -->
+    - [x] Step 3.3: Performance Testing <!-- id: 17 -->
+    - [x] Step 3.4: Security Testing <!-- id: 18 -->
+- [x] Phase 4: Deployment & Operations <!-- id: 19 -->
+    - [x] Step 4.1: Docker Containerization <!-- id: 20 -->
+    - [x] Step 4.2: Kubernetes Deployment <!-- id: 21 -->
+    - [x] Step 4.3: CI/CD Pipeline <!-- id: 22 -->
+- [x] Final Task: Create Windows Agent Test Plan <!-- id: 23 -->
