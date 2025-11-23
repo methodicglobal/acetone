@@ -43,16 +43,19 @@ public class ServiceFabricConfiguration
     [JsonPropertyName("ConnectionEndpoint")]
     [DisplayName("Connection Endpoint")]
     [Description("Service Fabric cluster connection endpoint (e.g., localhost:19000)")]
+    [Sensitive]
     public string ConnectionEndpoint { get; set; } = "localhost:19000";
 
     [JsonPropertyName("ServerCertThumbprint")]
     [DisplayName("Server Certificate Thumbprint")]
     [Description("Thumbprint of the Service Fabric cluster certificate")]
+    [Sensitive]
     public string? ServerCertThumbprint { get; set; }
 
     [JsonPropertyName("ClientCertThumbprint")]
     [DisplayName("Client Certificate Thumbprint")]
     [Description("Thumbprint of the client certificate for authentication")]
+    [Sensitive]
     public string? ClientCertThumbprint { get; set; }
 
     [JsonPropertyName("StoreLocation")]

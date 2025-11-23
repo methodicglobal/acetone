@@ -6,7 +6,7 @@ namespace Acetone.V2.TrayApp.Windows.Forms;
 public class ConfigurationForm : Form
 {
     private readonly string _configPath;
-    private readonly ConfigurationManager _configManager;
+    private readonly SecureConfigurationManager _configManager;
     private AcetoneConfiguration _configuration;
 
     private TabControl _tabControl;
@@ -45,7 +45,7 @@ public class ConfigurationForm : Form
     public ConfigurationForm(string configPath)
     {
         _configPath = configPath;
-        _configManager = new ConfigurationManager(configPath);
+        _configManager = new SecureConfigurationManager(configPath);
 
         try
         {
