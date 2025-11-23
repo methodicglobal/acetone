@@ -20,6 +20,8 @@
     </EntryPoint>
     <EnvironmentVariables>
       <EnvironmentVariable Name="ASPNETCORE_ENVIRONMENT" Value=""/>
+      <!-- Use the provided localhost certificate for HTTPS binding -->
+      <EnvironmentVariable Name="ACETONE_CERT_THUMBPRINT" Value="697463038b881aaf1760f2e3397bae991bd2e534"/>
     </EnvironmentVariables>
   </CodePackage>
 

@@ -175,6 +175,19 @@ public static class ServiceFabricUrlParser
             return endpoint.Replace("[::]", "[::1]");
         }
 
+        // If the endpoint points at the local machine name, normalize to localhost to avoid TLS name mismatches
+        if (Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+        {
+            var machine = Environment.MachineName;
+            if (uri.Host.Equals(machine, StringComparison.OrdinalIgnoreCase))
+            {
+                var builder = new UriBuilder(uri) { Host = "localhost" };
+                var normalized = builder.Uri.ToString().TrimEnd('/');
+                logger?.LogDebug("Normalized local host endpoint from {Original} to {Normalized}", endpoint, normalized);
+                return normalized;
+            }
+        }
+
         return endpoint;
     }
 
