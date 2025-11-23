@@ -61,8 +61,8 @@ jobs:
     - name: Build and push Docker image
       uses: docker/build-push-action@v4
       with:
-        context: .
-        file: acetone-v2/src/Acetone.V2.Proxy/Dockerfile
+        context: ./acetone-v2
+        file: ./acetone-v2/src/Acetone.V2.Proxy/Dockerfile
         push: ${{ github.event_name != 'pull_request' }}
         tags: ghcr.io/${{ github.repository }}/acetone-proxy:latest,ghcr.io/${{ github.repository }}/acetone-proxy:${{ github.sha }}
 
