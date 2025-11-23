@@ -16,6 +16,7 @@ namespace Acetone.V2.TrayApp.Linux.Configuration;
 public class SecureConfigurationManager
 {
     private readonly string _configPath;
+    private readonly AuditLogger _auditLogger;
     private const string EncryptedPrefix = "ENC:";
     private static readonly byte[] Salt = Encoding.UTF8.GetBytes("Acetone.V2.SecureConfig.Linux");
 
@@ -26,6 +27,12 @@ public class SecureConfigurationManager
     public SecureConfigurationManager(string configPath)
     {
         _configPath = configPath;
+
+        // Place audit log in same directory as config
+        var auditLogPath = Path.Combine(
+            Path.GetDirectoryName(configPath) ?? ".",
+            "acetone-audit.log");
+        _auditLogger = new AuditLogger(auditLogPath);
     }
 
     /// <summary>
@@ -33,17 +40,26 @@ public class SecureConfigurationManager
     /// </summary>
     public AcetoneConfiguration Load()
     {
-        if (!File.Exists(_configPath))
+        try
         {
-            throw new FileNotFoundException($"Configuration file not found: {_configPath}");
+            if (!File.Exists(_configPath))
+            {
+                throw new FileNotFoundException($"Configuration file not found: {_configPath}");
+            }
+
+            var json = File.ReadAllText(_configPath);
+            var config = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
+                        ?? new AcetoneConfiguration();
+
+            DecryptSensitiveFields(config);
+            _auditLogger.LogConfigurationLoad(success: true);
+            return config;
         }
-
-        var json = File.ReadAllText(_configPath);
-        var config = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
-                    ?? new AcetoneConfiguration();
-
-        DecryptSensitiveFields(config);
-        return config;
+        catch (Exception ex)
+        {
+            _auditLogger.LogConfigurationLoad(success: false, errorMessage: ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
@@ -51,35 +67,71 @@ public class SecureConfigurationManager
     /// </summary>
     public void Save(AcetoneConfiguration configuration)
     {
-        // Validate first
-        var errors = Validate(configuration);
-        if (errors.Count > 0)
+        // Load old configuration for audit comparison
+        AcetoneConfiguration? oldConfig = null;
+        try
         {
-            throw new ValidationException($"Configuration validation failed:\n{string.Join("\n", errors)}");
+            oldConfig = Load();
+        }
+        catch
+        {
+            // If load fails, this might be first save - that's OK
         }
 
-        // Clone the configuration to avoid modifying the original
-        var json = JsonSerializer.Serialize(configuration);
-        var configToSave = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
-                          ?? throw new InvalidOperationException("Failed to clone configuration");
-
-        EncryptSensitiveFields(configToSave);
-
-        // Backup existing configuration
-        if (File.Exists(_configPath))
+        try
         {
-            var backupPath = $"{_configPath}.backup.{DateTime.Now:yyyyMMddHHmmss}";
-            File.Copy(_configPath, backupPath, true);
+            // Validate first
+            var errors = Validate(configuration);
+            if (errors.Count > 0)
+            {
+                _auditLogger.LogValidationFailure(errors);
+                throw new ValidationException($"Configuration validation failed:\n{string.Join("\n", errors)}");
+            }
+
+            // Clone the configuration to avoid modifying the original
+            var json = JsonSerializer.Serialize(configuration);
+            var configToSave = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
+                              ?? throw new InvalidOperationException("Failed to clone configuration");
+
+            EncryptSensitiveFields(configToSave);
+
+            // Backup existing configuration
+            if (File.Exists(_configPath))
+            {
+                var backupPath = $"{_configPath}.backup.{DateTime.Now:yyyyMMddHHmmss}";
+                File.Copy(_configPath, backupPath, true);
+            }
+
+            // Save with indented formatting
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                PropertyNameCaseInsensitive = true
+            };
+            var outputJson = JsonSerializer.Serialize(configToSave, options);
+            File.WriteAllText(_configPath, outputJson);
+
+            // Log successful change
+            _auditLogger.LogConfigurationChange(
+                oldConfig ?? new AcetoneConfiguration(),
+                configuration,
+                success: true);
         }
-
-        // Save with indented formatting
-        var options = new JsonSerializerOptions
+        catch (ValidationException)
         {
-            WriteIndented = true,
-            PropertyNameCaseInsensitive = true
-        };
-        var outputJson = JsonSerializer.Serialize(configToSave, options);
-        File.WriteAllText(_configPath, outputJson);
+            // Validation failures are already logged
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Log failed save
+            _auditLogger.LogConfigurationChange(
+                oldConfig ?? new AcetoneConfiguration(),
+                configuration,
+                success: false,
+                errorMessage: ex.Message);
+            throw;
+        }
     }
 
     /// <summary>

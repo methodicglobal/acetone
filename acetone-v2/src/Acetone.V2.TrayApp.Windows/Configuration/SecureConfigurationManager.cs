@@ -18,9 +18,15 @@ public class SecureConfigurationManager : ConfigurationManager
 {
     private const string EncryptedPrefix = "ENC:";
     private static readonly byte[] AdditionalEntropy = Encoding.UTF8.GetBytes("Acetone.V2.SecureConfig");
+    private readonly AuditLogger _auditLogger;
 
     public SecureConfigurationManager(string configPath) : base(configPath)
     {
+        // Place audit log in same directory as config
+        var auditLogPath = Path.Combine(
+            Path.GetDirectoryName(configPath) ?? ".",
+            "acetone-audit.log");
+        _auditLogger = new AuditLogger(auditLogPath);
     }
 
     /// <summary>
@@ -28,9 +34,18 @@ public class SecureConfigurationManager : ConfigurationManager
     /// </summary>
     public new AcetoneConfiguration Load()
     {
-        var config = base.Load();
-        DecryptSensitiveFields(config);
-        return config;
+        try
+        {
+            var config = base.Load();
+            DecryptSensitiveFields(config);
+            _auditLogger.LogConfigurationLoad(success: true);
+            return config;
+        }
+        catch (Exception ex)
+        {
+            _auditLogger.LogConfigurationLoad(success: false, errorMessage: ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
@@ -38,15 +53,58 @@ public class SecureConfigurationManager : ConfigurationManager
     /// </summary>
     public new void Save(AcetoneConfiguration configuration)
     {
-        // Clone the configuration to avoid modifying the original
-        var json = JsonSerializer.Serialize(configuration);
-        var configToSave = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
-                          ?? throw new InvalidOperationException("Failed to clone configuration");
+        // Load old configuration for audit comparison
+        AcetoneConfiguration? oldConfig = null;
+        try
+        {
+            oldConfig = Load();
+        }
+        catch
+        {
+            // If load fails, this might be first save - that's OK
+        }
 
-        EncryptSensitiveFields(configToSave);
+        try
+        {
+            // Validate before saving
+            var errors = Validate(configuration);
+            if (errors.Count > 0)
+            {
+                _auditLogger.LogValidationFailure(errors);
+                throw new ValidationException($"Configuration validation failed:\n{string.Join("\n", errors)}");
+            }
 
-        // Use base save which includes validation
-        base.Save(configToSave);
+            // Clone the configuration to avoid modifying the original
+            var json = JsonSerializer.Serialize(configuration);
+            var configToSave = JsonSerializer.Deserialize<AcetoneConfiguration>(json)
+                              ?? throw new InvalidOperationException("Failed to clone configuration");
+
+            EncryptSensitiveFields(configToSave);
+
+            // Use base save which includes validation
+            base.Save(configToSave);
+
+            // Log successful change
+            _auditLogger.LogConfigurationChange(
+                oldConfig ?? new AcetoneConfiguration(),
+                configuration,
+                success: true);
+        }
+        catch (ValidationException)
+        {
+            // Validation failures are already logged
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Log failed save
+            _auditLogger.LogConfigurationChange(
+                oldConfig ?? new AcetoneConfiguration(),
+                configuration,
+                success: false,
+                errorMessage: ex.Message);
+            throw;
+        }
     }
 
     /// <summary>
