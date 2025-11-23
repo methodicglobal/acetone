@@ -10,7 +10,6 @@ using Xunit;
 using Acetone.V2.Core.Caching;
 using Acetone.V2.Core.Resilience;
 using Polly;
-using Polly;
 using Acetone.V2.Core.Diagnostics;
 using System.Fabric;
 

@@ -13,20 +13,16 @@ public class AcetoneOptionsValidator : IValidateOptions<AcetoneOptions>
             errors.Add("At least one ClusterConnectionString must be provided.");
         }
 
-        if (options.CredentialsType == CredentialsType.CertificateThumbprint)
+        if (options.CredentialsType == CredentialsType.CertificateThumbprint &&
+            string.IsNullOrWhiteSpace(options.ClientCertificateThumbprint))
         {
-            if (string.IsNullOrWhiteSpace(options.ClientCertificateThumbprint))
-            {
-                errors.Add("ClientCertificateThumbprint is required when CredentialsType is CertificateThumbprint.");
-            }
+            errors.Add("ClientCertificateThumbprint is required when CredentialsType is CertificateThumbprint.");
         }
 
-        if (options.CredentialsType == CredentialsType.CertificateCommonName)
+        if (options.CredentialsType == CredentialsType.CertificateCommonName &&
+            string.IsNullOrWhiteSpace(options.ClientCertificateSubjectDistinguishedName))
         {
-            if (string.IsNullOrWhiteSpace(options.ClientCertificateSubjectDistinguishedName))
-            {
-                errors.Add("ClientCertificateSubjectDistinguishedName is required when CredentialsType is CertificateCommonName.");
-            }
+            errors.Add("ClientCertificateSubjectDistinguishedName is required when CredentialsType is CertificateCommonName.");
         }
 
         if (options.ConnectionTimeout.TotalMilliseconds <= 0)

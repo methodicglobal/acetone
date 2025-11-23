@@ -9,7 +9,7 @@ public class ServiceFabricProxyConfig : IProxyConfig
     {
         Routes = routes;
         Clusters = clusters;
-        ChangeToken = new CancellationChangeToken(new CancellationTokenSource().Token); // Static for now
+        ChangeToken = new CancellationChangeToken(CancellationToken.None); // Static config for now
     }
 
     public IReadOnlyList<RouteConfig> Routes { get; }

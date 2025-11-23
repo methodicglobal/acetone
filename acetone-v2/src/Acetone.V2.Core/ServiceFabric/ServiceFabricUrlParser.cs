@@ -210,7 +210,7 @@ public static class ServiceFabricUrlParser
             return url;
         }
 
-        string candidate = url;
+        string candidate;
 
         // Case 1: pattern like https://host:443:ipv6tail -> keep first group + optional path
         var m1 = MalformedDualPortIpv6TailPattern.Match(url);
