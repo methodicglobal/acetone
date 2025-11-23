@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -25,15 +26,22 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         Port = port;
     }
 
-    public static async Task<TestHttpsBackend> StartAsync(string thumbprint)
+    public static async Task<TestHttpsBackend> StartAsync(string? thumbprint)
     {
-        if (string.IsNullOrWhiteSpace(thumbprint))
+        X509Certificate2 cert;
+        if (OperatingSystem.IsWindows())
         {
-            throw new ArgumentException("Thumbprint is required for HTTPS backend", nameof(thumbprint));
+            if (string.IsNullOrWhiteSpace(thumbprint))
+            {
+                throw new ArgumentException("Thumbprint is required for Windows HTTPS backend", nameof(thumbprint));
+            }
+            cert = FindCertificate(thumbprint) ??
+                   throw new InvalidOperationException($"Certificate with thumbprint '{thumbprint}' not found in CurrentUser/My.");
         }
-
-        var cert = FindCertificate(thumbprint) ??
-                   throw new InvalidOperationException($"Certificate with thumbprint '{thumbprint}' not found in CurrentUser/My or LocalMachine/My.");
+        else
+        {
+            cert = CreateSelfSignedLocalhostCertificate();
+        }
 
         int port = GetFreeTcpPort();
 
@@ -73,7 +81,7 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
     private static X509Certificate2? FindCertificate(string thumbprint)
     {
         string normalized = thumbprint.Replace(" ", string.Empty, StringComparison.Ordinal).ToUpperInvariant();
-        foreach (var location in new[] { StoreLocation.CurrentUser, StoreLocation.LocalMachine })
+        foreach (var location in new[] { StoreLocation.CurrentUser })
         {
             using var store = new X509Store(StoreName.My, location);
             store.Open(OpenFlags.ReadOnly);
@@ -86,6 +94,21 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
             }
         }
         return null;
+    }
+
+    private static X509Certificate2 CreateSelfSignedLocalhostCertificate()
+    {
+        using var rsa = RSA.Create(2048);
+        var req = new CertificateRequest("CN=localhost", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
+        req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
+        req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
+        var sanBuilder = new SubjectAlternativeNameBuilder();
+        sanBuilder.AddDnsName("localhost");
+        req.CertificateExtensions.Add(sanBuilder.Build());
+
+        var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
+        return cert;
     }
 
     private static int GetFreeTcpPort()

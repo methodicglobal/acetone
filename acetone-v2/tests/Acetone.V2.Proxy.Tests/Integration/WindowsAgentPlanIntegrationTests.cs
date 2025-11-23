@@ -23,7 +23,7 @@ public class WindowsAgentPlanIntegrationTests : IClassFixture<AcetoneProxyApplic
     [Fact]
     public async Task Proxy_Forwards_To_Https_Backend_With_Localhost_Cert()
     {
-        await using var backend = await TestHttpsBackend.StartAsync(Thumbprint);
+        await using var backend = await TestHttpsBackend.StartAsync(OperatingSystem.IsWindows() ? Thumbprint : null);
 
         string backendUrl = $"https://localhost:{backend.Port}/";
         _factory.MockResolver.ResolveUrlAsync("testapp", Arg.Any<Guid>())
