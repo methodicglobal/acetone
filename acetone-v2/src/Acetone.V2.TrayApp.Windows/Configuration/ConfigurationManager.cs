@@ -406,12 +406,9 @@ public class ConfigurationManager
         {
             foreach (var (clusterId, cluster) in configuration.ReverseProxy.Clusters)
             {
-                if (cluster.SessionAffinity?.Enabled == true)
+                if (cluster.SessionAffinity?.Enabled == true && cluster.SessionAffinity.Policy == "CustomHeader")
                 {
-                    if (cluster.SessionAffinity.Policy == "CustomHeader")
-                    {
-                        errors.Add($"SECURITY WARNING: Cluster '{clusterId}' uses CustomHeader session affinity. Ensure the header cannot be spoofed by clients.");
-                    }
+                    errors.Add($"SECURITY WARNING: Cluster '{clusterId}' uses CustomHeader session affinity. Ensure the header cannot be spoofed by clients.");
                 }
             }
         }
