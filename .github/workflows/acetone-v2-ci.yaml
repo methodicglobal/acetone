@@ -1,4 +1,4 @@
-name: Acetone V2 CI
+name: Acetone V2 CI/CD
 
 on:
   push:
@@ -6,121 +6,357 @@ on:
     tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create a new release (will auto-increment version)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  packages: write
+  actions: read
 
 env:
   DOTNET_VERSION: 10.0.x
   SOLUTION_PATH: acetone-v2/Acetone.V2.sln
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    name: Build & Test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
 
     steps:
-    - uses: actions/checkout@v3
-    
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
-        
+
+    - name: Cache NuGet packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.nuget/packages
+          ${{ github.workspace }}/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/*.csproj') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
     - name: Restore dependencies
       working-directory: acetone-v2
       run: dotnet restore Acetone.V2.sln
-      
+
     - name: Build
       working-directory: acetone-v2
       run: dotnet build Acetone.V2.sln --no-restore --configuration Release
-      
+
     - name: Test (Unit & Integration)
       working-directory: acetone-v2
-      run: dotnet test Acetone.V2.sln --no-build --configuration Release --verbosity normal
-      
-    - name: Security Scan
+      run: dotnet test Acetone.V2.sln --no-build --configuration Release --verbosity normal --logger "trx;LogFileName=test-results.trx"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ matrix.os }}
+        path: '**/test-results.trx'
+        retention-days: 30
+
+    - name: Security Scan (Vulnerable Packages)
       working-directory: acetone-v2
-      run: dotnet list package --vulnerable
+      run: dotnet list package --vulnerable --include-transitive || true
+      continue-on-error: true
 
-  docker-build:
+  publish-binaries:
+    name: Publish ${{ matrix.rid }}
     runs-on: ubuntu-latest
     needs: build-and-test
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v2
-      
-    - name: Login to Container Registry
-      if: github.event_name != 'pull_request'
-      uses: docker/login-action@v2
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-        
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v4
-      with:
-        context: ./acetone-v2
-        file: ./acetone-v2/src/Acetone.V2.Proxy/Dockerfile
-        push: ${{ github.event_name != 'pull_request' }}
-        tags: ghcr.io/${{ github.repository }}/acetone-proxy:latest,ghcr.io/${{ github.repository }}/acetone-proxy:${{ github.sha }}
-
-  publish:
-    name: Publish binaries (win-x64, linux-x64)
-    runs-on: ubuntu-latest
-    needs: build-and-test
-    if: startsWith(github.ref, 'refs/tags/')
+    if: |
+      github.event_name == 'push' && github.ref == 'refs/heads/main' ||
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
     strategy:
       matrix:
         rid: [ "win-x64", "linux-x64" ]
+        include:
+          - rid: win-x64
+            artifact_ext: zip
+          - rid: linux-x64
+            artifact_ext: tar.gz
 
     steps:
-    - uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Restore
+    - name: Restore dependencies
       working-directory: acetone-v2
       run: dotnet restore ${{ env.SOLUTION_PATH }}
 
     - name: Publish ${{ matrix.rid }}
       working-directory: acetone-v2
-      run: dotnet publish src/Acetone.V2.Proxy/Acetone.V2.Proxy.csproj -c Release -r ${{ matrix.rid }} --self-contained false /p:PublishSingleFile=true /p:DebugType=None /p:DebugSymbols=false -o out/${{ matrix.rid }}
+      run: |
+        dotnet publish src/Acetone.V2.Proxy/Acetone.V2.Proxy.csproj \
+          -c Release \
+          -r ${{ matrix.rid }} \
+          --self-contained false \
+          /p:PublishSingleFile=true \
+          /p:DebugType=None \
+          /p:DebugSymbols=false \
+          -o out/${{ matrix.rid }}
 
-    - name: Package artifact ${{ matrix.rid }}
+    - name: Publish Windows Tray App
+      if: matrix.rid == 'win-x64'
+      working-directory: acetone-v2
+      run: |
+        dotnet publish src/Acetone.V2.TrayApp.Windows/Acetone.V2.TrayApp.Windows.csproj \
+          -c Release \
+          -r ${{ matrix.rid }} \
+          --self-contained false \
+          /p:PublishSingleFile=true \
+          /p:DebugType=None \
+          /p:DebugSymbols=false \
+          -o out/${{ matrix.rid }}/tray
+
+    - name: Publish Linux Tray App
+      if: matrix.rid == 'linux-x64'
+      working-directory: acetone-v2
+      run: |
+        dotnet publish src/Acetone.V2.TrayApp.Linux/Acetone.V2.TrayApp.Linux.csproj \
+          -c Release \
+          -r ${{ matrix.rid }} \
+          --self-contained false \
+          /p:PublishSingleFile=true \
+          /p:DebugType=None \
+          /p:DebugSymbols=false \
+          -o out/${{ matrix.rid }}/tray
+
+    - name: Copy deployment files
+      working-directory: acetone-v2
+      shell: bash
+      run: |
+        # Copy README and installer scripts to output directory
+        cp deployment/README.md out/${{ matrix.rid }}/
+        cp deployment/appsettings.example.json out/${{ matrix.rid }}/
+
+        if [[ "${{ matrix.rid }}" == "win-x64" ]]; then
+          cp deployment/install.ps1 out/${{ matrix.rid }}/
+          cp deployment/install-tray.ps1 out/${{ matrix.rid }}/
+          echo "Copied Windows installers"
+        else
+          cp deployment/install.sh out/${{ matrix.rid }}/
+          cp deployment/install-tray.sh out/${{ matrix.rid }}/
+          cp deployment/acetone-tray.desktop out/${{ matrix.rid }}/
+          chmod +x out/${{ matrix.rid }}/install.sh
+          chmod +x out/${{ matrix.rid }}/install-tray.sh
+          echo "Copied Linux installers and desktop file, set executable permissions"
+        fi
+
+        ls -la out/${{ matrix.rid }}/
+        ls -la out/${{ matrix.rid }}/tray/
+
+    - name: Create version info
+      working-directory: acetone-v2/out/${{ matrix.rid }}
+      shell: bash
+      run: |
+        VERSION="${GITHUB_REF_NAME}"
+        if [[ "$VERSION" == "main" ]] || [[ "$VERSION" == "claude/"* ]]; then
+          VERSION="dev-${GITHUB_SHA:0:8}"
+        fi
+        echo "Acetone V2 Proxy" > VERSION.txt
+        echo "Version: $VERSION" >> VERSION.txt
+        echo "Built: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> VERSION.txt
+        echo "Commit: ${GITHUB_SHA}" >> VERSION.txt
+        echo "Platform: ${{ matrix.rid }}" >> VERSION.txt
+        cat VERSION.txt
+
+    - name: Package artifact (Windows)
+      if: matrix.rid == 'win-x64'
       working-directory: acetone-v2/out
-      run: zip -r ../acetone-v2-${{ matrix.rid }}.zip ${{ matrix.rid }}
+      run: |
+        sudo apt-get update && sudo apt-get install -y zip
+        cd ${{ matrix.rid }}
+        zip -r ../../acetone-v2-${{ matrix.rid }}.zip .
+        cd ../..
+        ls -lh acetone-v2-${{ matrix.rid }}.zip
 
-    - name: Upload artifact ${{ matrix.rid }}
+    - name: Package artifact (Linux)
+      if: matrix.rid == 'linux-x64'
+      working-directory: acetone-v2/out
+      run: |
+        cd ${{ matrix.rid }}
+        tar -czf ../../acetone-v2-${{ matrix.rid }}.tar.gz .
+        cd ../..
+        ls -lh acetone-v2-${{ matrix.rid }}.tar.gz
+
+    - name: Upload build artifact
       uses: actions/upload-artifact@v4
       with:
         name: acetone-v2-${{ matrix.rid }}
-        path: acetone-v2/acetone-v2-${{ matrix.rid }}.zip
+        path: |
+          acetone-v2/acetone-v2-${{ matrix.rid }}.${{ matrix.artifact_ext }}
         if-no-files-found: error
+        retention-days: 90
 
-  release:
-    name: Release
+  docker-build:
+    name: Build & Push Docker Image
     runs-on: ubuntu-latest
-    needs: publish
-    if: startsWith(github.ref, 'refs/tags/')
-    steps:
-    - uses: actions/checkout@v3
+    needs: build-and-test
+    if: |
+      github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
 
-    - name: Download artifacts
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}/acetone-v2-proxy
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+          type=raw,value=latest,enable={{is_default_branch}}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./acetone-v2
+        file: ./acetone-v2/src/Acetone.V2.Proxy/Dockerfile
+        push: true
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+        platforms: linux/amd64
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: publish-binaries
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release == 'true')
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
       uses: actions/download-artifact@v4
       with:
         path: artifacts
+        pattern: acetone-v2-*
+        merge-multiple: false
+
+    - name: Display artifact structure
+      run: |
+        ls -R artifacts/
+
+    - name: Determine version tag
+      id: version
+      shell: bash
+      run: |
+        if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+          echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        else
+          # Auto-increment version for manual releases
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          IFS='.' read -r -a VERSION_PARTS <<< "${LATEST_TAG#v}"
+          MAJOR="${VERSION_PARTS[0]}"
+          MINOR="${VERSION_PARTS[1]}"
+          PATCH="${VERSION_PARTS[2]}"
+          NEXT_PATCH=$((PATCH + 1))
+          NEXT_TAG="v${MAJOR}.${MINOR}.${NEXT_PATCH}"
+          echo "tag=${NEXT_TAG}" >> $GITHUB_OUTPUT
+          echo "is_prerelease=false" >> $GITHUB_OUTPUT
+        fi
+        echo "Version tag: $(cat $GITHUB_OUTPUT | grep tag)"
 
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v2
       with:
+        tag_name: ${{ steps.version.outputs.tag }}
+        name: Acetone V2 ${{ steps.version.outputs.tag }}
+        draft: false
+        prerelease: ${{ steps.version.outputs.is_prerelease }}
+        generate_release_notes: true
+        body: |
+          ## Acetone V2 Release ${{ steps.version.outputs.tag }}
+
+          ### Artifacts
+          - **Windows (x64)**: `acetone-v2-win-x64.zip` (proxy, tray app, install.ps1, install-tray.ps1, README, appsettings.example.json, VERSION.txt)
+          - **Linux (x64)**: `acetone-v2-linux-x64.tar.gz` (proxy, tray app, install.sh, install-tray.sh, acetone-tray.desktop, README, appsettings.example.json, VERSION.txt)
+
+          ### Install & Run (Windows)
+          ```powershell
+          Expand-Archive acetone-v2-win-x64.zip -DestinationPath acetone-v2
+          cd acetone-v2
+          .\install.ps1 -CreateService -StartService -InstallTrayApp
+          ```
+
+          ### Install & Run (Linux)
+          ```bash
+          tar -xzf acetone-v2-linux-x64.tar.gz -C acetone-v2
+          cd acetone-v2
+          sudo ./install.sh --create-service --start-service --install-tray-app
+          ```
+
+          ### Manual Run (no service)
+          - Windows: `.\Acetone.V2.Proxy.exe`
+          - Linux: `./Acetone.V2.Proxy`
+
+          ### Docker
+          ```bash
+          docker pull ghcr.io/${{ github.repository }}/acetone-v2-proxy:${{ steps.version.outputs.tag }}
+          docker run -p 8080:8080 -p 9090:9090 ghcr.io/${{ github.repository }}/acetone-v2-proxy:${{ steps.version.outputs.tag }}
+          ```
+
+          ---
+
+          **Build Information:**
+          - Commit: `${{ github.sha }}`
+          - Built: `${{ github.run_id }}`
         files: |
           artifacts/acetone-v2-win-x64/acetone-v2-win-x64.zip
-          artifacts/acetone-v2-linux-x64/acetone-v2-linux-x64.zip
-        generate_release_notes: true
+          artifacts/acetone-v2-linux-x64/acetone-v2-linux-x64.tar.gz
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

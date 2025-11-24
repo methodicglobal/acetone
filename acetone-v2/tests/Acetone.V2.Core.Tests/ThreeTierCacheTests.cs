@@ -73,7 +73,7 @@ public class ThreeTierCacheTests
         await _cache.SetPartitionAsync(key, partition);
         
         // Wait for expiration (TTL is 1s)
-        await Task.Delay(1100);
+        await Task.Delay(1100, TestContext.Current.CancellationToken);
         
         var result = await _cache.GetPartitionAsync(key);
         

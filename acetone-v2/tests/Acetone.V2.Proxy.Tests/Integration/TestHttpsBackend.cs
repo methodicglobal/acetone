@@ -28,20 +28,11 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
 
     public static async Task<TestHttpsBackend> StartAsync(string? thumbprint)
     {
-        X509Certificate2 cert;
-        if (OperatingSystem.IsWindows())
-        {
-            if (string.IsNullOrWhiteSpace(thumbprint))
-            {
-                throw new ArgumentException("Thumbprint is required for Windows HTTPS backend", nameof(thumbprint));
-            }
-            cert = FindCertificate(thumbprint) ??
-                   throw new InvalidOperationException($"Certificate with thumbprint '{thumbprint}' not found in CurrentUser/My.");
-        }
-        else
-        {
-            cert = CreateSelfSignedLocalhostCertificate();
-        }
+        // Prefer a supplied certificate on Windows, but fall back to a self-signed localhost cert
+        // so CI can run without pre-provisioned certs.
+        X509Certificate2 cert = (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(thumbprint))
+            ? (FindCertificate(thumbprint) ?? CreateSelfSignedLocalhostCertificate())
+            : CreateSelfSignedLocalhostCertificate();
 
         int port = GetFreeTcpPort();
 
@@ -59,8 +50,7 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         app.MapGet("/", () => Results.Ok("backend ok"));
 
         var runTask = app.RunAsync();
-        // Give Kestrel a moment to bind
-        await Task.Delay(200);
+        await WaitForBackendReadyAsync($"https://localhost:{port}/");
 
         return new TestHttpsBackend(app, runTask, port);
     }
@@ -103,12 +93,46 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
         req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
         req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
+        var eku = new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }; // Server Authentication
+        req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(eku, false));
         var sanBuilder = new SubjectAlternativeNameBuilder();
         sanBuilder.AddDnsName("localhost");
         req.CertificateExtensions.Add(sanBuilder.Build());
 
         var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         return cert;
+    }
+
+    private static async Task WaitForBackendReadyAsync(string baseUrl)
+    {
+        using var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        };
+        using var client = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(2)
+        };
+
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            try
+            {
+                var response = await client.GetAsync($"{baseUrl}weatherforecast");
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // Backend not ready yet; retry.
+            }
+
+            await Task.Delay(200);
+        }
+
+        throw new InvalidOperationException("HTTPS test backend failed to start within timeout.");
     }
 
     private static int GetFreeTcpPort()

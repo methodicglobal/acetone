@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Acetone V2 Proxy Manager
+Comment=System tray manager for Acetone V2 Proxy
+Exec=/opt/acetone/Acetone.TrayApp
+Icon=/opt/acetone/acetone-icon.png
+Terminal=false
+Categories=Network;System;
+StartupNotify=false
