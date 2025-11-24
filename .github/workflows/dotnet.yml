@@ -163,7 +163,7 @@ jobs:
         run: |
           git fetch --tags --force
           $latest = git tag --list "v*" | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v','') } | Select-Object -Last 1
-          if (-not $latest) { $latest = "v1.0.0" }
+          if (-not $latest) { $latest = "v1.6.0" }
 
           $ver = [version]($latest -replace '^v','')
           $next = "v{0}.{1}.{2}" -f $ver.Major, $ver.Minor, ($ver.Build + 1)
