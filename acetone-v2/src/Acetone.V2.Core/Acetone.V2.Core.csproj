@@ -14,7 +14,7 @@
     <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.0" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.0" />
     <PackageReference Include="Microsoft.ServiceFabric" Version="11.3.475" />
-    <PackageReference Include="Polly" Version="8.6.4" />
+    <PackageReference Include="Polly" Version="8.6.5" />
     <PackageReference Include="System.Threading.RateLimiting" Version="10.0.0" />
   </ItemGroup>
 
