@@ -93,6 +93,8 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         req.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, false));
         req.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment, false));
         req.CertificateExtensions.Add(new X509SubjectKeyIdentifierExtension(req.PublicKey, false));
+        var eku = new OidCollection { new Oid("1.3.6.1.5.5.7.3.1") }; // Server Authentication
+        req.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(eku, false));
         var sanBuilder = new SubjectAlternativeNameBuilder();
         sanBuilder.AddDnsName("localhost");
         req.CertificateExtensions.Add(sanBuilder.Build());
@@ -107,9 +109,12 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         {
             ServerCertificateCustomValidationCallback = (_, _, _, _) => true
         };
-        using var client = new HttpClient(handler);
+        using var client = new HttpClient(handler)
+        {
+            Timeout = TimeSpan.FromSeconds(2)
+        };
 
-        for (int attempt = 0; attempt < 15; attempt++)
+        for (int attempt = 0; attempt < 30; attempt++)
         {
             try
             {
