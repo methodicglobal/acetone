@@ -44,6 +44,7 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
+        include-prerelease: false
 
     - name: Cache NuGet packages
       uses: actions/cache@v4
@@ -107,6 +108,7 @@ jobs:
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
+        include-prerelease: false
 
     - name: Restore dependencies
       working-directory: acetone-v2
@@ -193,7 +195,7 @@ jobs:
       if: matrix.rid == 'win-x64'
       working-directory: acetone-v2/out
       run: |
-        apt-get update && apt-get install -y zip
+        sudo apt-get update && sudo apt-get install -y zip
         cd ${{ matrix.rid }}
         zip -r ../../acetone-v2-${{ matrix.rid }}.zip .
         cd ../..

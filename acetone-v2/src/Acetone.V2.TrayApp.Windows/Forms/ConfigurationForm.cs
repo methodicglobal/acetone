@@ -9,38 +9,36 @@ public class ConfigurationForm : Form
     private readonly SecureConfigurationManager _configManager;
     private readonly AcetoneConfiguration _configuration;
 
-    private TabControl _tabControl;
-    private Button _saveButton;
-    private Button _cancelButton;
-    private Button _validateButton;
-    private Button _restartServiceButton;
+    private TabControl _tabControl = null!;
+    private Button _saveButton = null!;
+    private Button _cancelButton = null!;
+    private Button _validateButton = null!;
+    private Button _restartServiceButton = null!;
 
     // General tab controls
-    private TextBox _urlsTextBox;
-    private TextBox _allowedHostsTextBox;
+    private TextBox _urlsTextBox = null!;
+    private TextBox _allowedHostsTextBox = null!;
 
     // Logging tab controls
-    private DataGridView _loggingGrid;
+    private DataGridView _loggingGrid = null!;
 
     // Service Fabric tab controls
-    private TextBox _sfEndpointTextBox;
-    private TextBox _sfServerThumbprintTextBox;
-    private TextBox _sfClientThumbprintTextBox;
-    private ComboBox _sfStoreLocationCombo;
-    private TextBox _sfStoreNameTextBox;
-    private ComboBox _sfProtectionLevelCombo;
+    private TextBox _sfEndpointTextBox = null!;
+    private TextBox _sfServerThumbprintTextBox = null!;
+    private TextBox _sfClientThumbprintTextBox = null!;
+    private ComboBox _sfStoreLocationCombo = null!;
+    private TextBox _sfStoreNameTextBox = null!;
+    private ComboBox _sfProtectionLevelCombo = null!;
 
     // Reverse Proxy tab controls
-    private ListBox _routesListBox;
-    private ListBox _clustersListBox;
-    private PropertyGrid _routePropertyGrid;
-    private PropertyGrid _clusterPropertyGrid;
+    private ListBox _routesListBox = null!;
+    private ListBox _clustersListBox = null!;
 
     // Rate Limiting tab controls
-    private CheckBox _rateLimitingEnabledCheckBox;
-    private NumericUpDown _permitLimitNumeric;
-    private TextBox _windowTextBox;
-    private NumericUpDown _queueLimitNumeric;
+    private CheckBox _rateLimitingEnabledCheckBox = null!;
+    private NumericUpDown _permitLimitNumeric = null!;
+    private TextBox _windowTextBox = null!;
+    private NumericUpDown _queueLimitNumeric = null!;
 
     public ConfigurationForm(string configPath)
     {
@@ -540,14 +538,11 @@ public class ConfigurationForm : Form
         _configuration.Logging.LogLevel.Clear();
         foreach (DataGridViewRow row in _loggingGrid.Rows)
         {
-            if (row.Cells[0].Value != null && row.Cells[1].Value != null)
+            var category = row.Cells[0].Value?.ToString();
+            var level = row.Cells[1].Value?.ToString();
+            if (!string.IsNullOrWhiteSpace(category) && !string.IsNullOrWhiteSpace(level))
             {
-                var category = row.Cells[0].Value.ToString();
-                var level = row.Cells[1].Value.ToString();
-                if (!string.IsNullOrWhiteSpace(category) && !string.IsNullOrWhiteSpace(level))
-                {
-                    _configuration.Logging.LogLevel[category] = level;
-                }
+                _configuration.Logging.LogLevel[category] = level;
             }
         }
 
