@@ -77,13 +77,19 @@ namespace Methodic.Acetone
 		{ }
 
 		public ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionString)
+			: this(logger, clusterConnectionString, skipFabricClientInitialization: false)
+		{ }
+
+		protected ServiceFabricUrlResolver(ILogger logger, List<string> clusterConnectionStrings, bool skipFabricClientInitialization, bool warmupCache = true)
 		{
-			this.Logger = logger;
-			this.ClusterConnectionStrings = clusterConnectionString;
-			string[] endpoints = this.ClusterConnectionStrings.ToArray();
-			this.Client = new FabricClient(Settings, endpoints);
-			this.Client.ServiceManager.ServiceNotificationFilterMatched += this.ServiceManager_ServiceNotificationFilterMatched;
-			this.WarmupCache();
+			this.Logger = logger ?? throw new ArgumentNullException(nameof(logger));
+			this.ClusterConnectionStrings = clusterConnectionStrings ?? new List<string>();
+
+			if (!skipFabricClientInitialization)
+			{
+				string[] endpoints = this.ClusterConnectionStrings.ToArray();
+				InitializeClient(new FabricClient(Settings, endpoints), warmupCache);
+			}
 		}
 
 		public ServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, string clientCertificateSubjectDistinguishedName, string clientCertificateIssuerDistinguishedName, IList<String> remoteCertificateCommonNames)
@@ -168,9 +174,7 @@ namespace Methodic.Acetone
 				}
 			}
 			string[] endpoints = this.ClusterConnectionStrings.ToArray();
-			this.Client = new FabricClient(creds, Settings, endpoints);
-			this.Client.ServiceManager.ServiceNotificationFilterMatched += this.ServiceManager_ServiceNotificationFilterMatched;
-			this.WarmupCache();
+			InitializeClient(new FabricClient(creds, Settings, endpoints));
 
 
 		}
@@ -224,9 +228,18 @@ namespace Methodic.Acetone
 				}
 			}
 			string[] endpoints = this.ClusterConnectionStrings.ToArray();
-			this.Client = new FabricClient(creds, Settings, endpoints);
+			InitializeClient(new FabricClient(creds, Settings, endpoints));
+		}
+
+		private void InitializeClient(FabricClient client, bool warmupCache = true)
+		{
+			this.Client = client;
 			this.Client.ServiceManager.ServiceNotificationFilterMatched += this.ServiceManager_ServiceNotificationFilterMatched;
-			this.WarmupCache();
+
+			if (warmupCache)
+			{
+				this.WarmupCache();
+			}
 		}
 
 		private void WarmupCache()
@@ -767,7 +780,7 @@ namespace Methodic.Acetone
 			if (disposing)
 			{
 				// free managed resources
-				this.Client.Dispose();
+				this.Client?.Dispose();
 			}
 			isDisposed = true;
 		}

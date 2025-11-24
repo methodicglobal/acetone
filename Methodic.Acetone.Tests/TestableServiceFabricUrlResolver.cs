@@ -17,7 +17,10 @@ namespace Methodic.Acetone.Tests
 		private static readonly Regex ServicePattern = new Regex(@"^Service([A-H])$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
 		public TestableServiceFabricUrlResolver(ILogger logger, string clusterConnectionString, bool useMockData = true)
-			: base(logger, clusterConnectionString)
+			: base(
+				logger,
+				new List<string> { string.IsNullOrWhiteSpace(clusterConnectionString) ? "localhost:19000" : clusterConnectionString },
+				skipFabricClientInitialization: useMockData)
 		{
 			this.useMockData = useMockData;
 			// Previous eager initialisation removed. Cache now starts empty and is filled on demand.
