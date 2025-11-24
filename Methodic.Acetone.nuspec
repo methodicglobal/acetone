@@ -38,8 +38,8 @@ See the included readme (`docs/nuget-readme.md`) or project site for configurati
     </dependencies>
   </metadata>
   <files>
-    <file src="Methodic.Acetone\bin\$configuration$\net481\Methodic.Acetone.dll" target="lib\net481" />
-    <file src="Methodic.Acetone\bin\$configuration$\net481\Methodic.Acetone.pdb" target="lib\net481" />
+    <file src="Methodic.Acetone\bin\x64\$configuration$\net481\Methodic.Acetone.dll" target="lib\net481" />
+    <file src="Methodic.Acetone\bin\x64\$configuration$\net481\Methodic.Acetone.pdb" target="lib\net481" />
     <file src="LICENSE*" target="" />
     <file src="README*" target="" />
     <file src="docs\nuget-readme.md" target="docs" />
