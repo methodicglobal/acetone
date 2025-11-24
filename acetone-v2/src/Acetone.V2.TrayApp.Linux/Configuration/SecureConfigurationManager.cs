@@ -325,13 +325,13 @@ public class SecureConfigurationManager
             }
 
             // Derive a proper encryption key using PBKDF2
-            using var pbkdf2 = new Rfc2898DeriveBytes(
-                machineId,
-                Salt,
+            // Use the static PBKDF2 helper to avoid obsolete constructors and ensure consistent key size
+            _cachedMachineKey = Rfc2898DeriveBytes.Pbkdf2(
+                password: machineId,
+                salt: Salt,
                 iterations: 10000,
-                HashAlgorithmName.SHA256);
-
-            _cachedMachineKey = pbkdf2.GetBytes(32); // 256-bit key for AES-256
+                hashAlgorithm: HashAlgorithmName.SHA256,
+                outputLength: 32); // 256-bit key for AES-256
             return _cachedMachineKey;
         }
     }
@@ -348,8 +348,9 @@ public class SecureConfigurationManager
         {
             var key = GetMachineKey();
             var plainBytes = Encoding.UTF8.GetBytes(plainText);
+            var tagSize = AesGcm.TagByteSizes.MaxSize;
 
-            using var aes = new AesGcm(key);
+            using var aes = new AesGcm(key, tagSize);
 
             // Generate random nonce (12 bytes for GCM)
             var nonce = new byte[AesGcm.NonceByteSizes.MaxSize];
@@ -357,7 +358,7 @@ public class SecureConfigurationManager
 
             // Prepare output buffer
             var ciphertext = new byte[plainBytes.Length];
-            var tag = new byte[AesGcm.TagByteSizes.MaxSize];
+            var tag = new byte[tagSize];
 
             // Encrypt
             aes.Encrypt(nonce, plainBytes, ciphertext, tag);
@@ -402,7 +403,7 @@ public class SecureConfigurationManager
             Buffer.BlockCopy(combined, nonceSize, tag, 0, tagSize);
             Buffer.BlockCopy(combined, nonceSize + tagSize, ciphertext, 0, ciphertext.Length);
 
-            using var aes = new AesGcm(key);
+            using var aes = new AesGcm(key, tagSize);
             var plaintext = new byte[ciphertext.Length];
 
             // Decrypt

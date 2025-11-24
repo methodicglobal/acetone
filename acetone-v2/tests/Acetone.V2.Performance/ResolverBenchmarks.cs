@@ -99,8 +99,8 @@ public class StubClientWrapper : IFabricClientWrapper
 
 public class StubApp : IApplicationWrapper
 {
-    public Uri ApplicationName { get; set; }
-    public string ApplicationTypeName { get; set; }
+    public Uri ApplicationName { get; set; } = new Uri("fabric:/DefaultApp");
+    public string ApplicationTypeName { get; set; } = "DefaultAppType";
     public ApplicationStatus ApplicationStatus => ApplicationStatus.Ready;
     public string ApplicationTypeVersion => "1.0.0";
     public IReadOnlyDictionary<string, string> ApplicationParameters => new Dictionary<string, string>();
@@ -109,8 +109,8 @@ public class StubApp : IApplicationWrapper
 
 public class StubService : IServiceWrapper
 {
-    public Uri ServiceName { get; set; }
-    public string ServiceTypeName { get; set; }
+    public Uri ServiceName { get; set; } = new Uri("fabric:/DefaultApp/DefaultService");
+    public string ServiceTypeName { get; set; } = "DefaultServiceType";
     public string ServiceManifestVersion => "1.0.0";
     public ServiceKind ServiceKind { get; set; }
     public ServiceStatus ServiceStatus => ServiceStatus.Active;
@@ -120,13 +120,13 @@ public class StubService : IServiceWrapper
 
 public class StubPartition : IResolvedServicePartitionWrapper
 {
-    public StubEndpoint Endpoint { get; set; }
+    public StubEndpoint Endpoint { get; set; } = new StubEndpoint();
     public IResolvedServiceEndpointWrapper GetEndpoint() => Endpoint;
 }
 
 public class StubEndpoint : IResolvedServiceEndpointWrapper
 {
-    public string Address { get; set; }
+    public string Address { get; set; } = "http://localhost:8080/";
     public ServiceEndpointRole Role => ServiceEndpointRole.Stateless;
 }
 

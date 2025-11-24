@@ -324,34 +324,29 @@ jobs:
         body: |
           ## Acetone V2 Release ${{ steps.version.outputs.tag }}
 
-          ### 📦 Download Options
+          ### Artifacts
+          - **Windows (x64)**: `acetone-v2-win-x64.zip` (proxy, tray app, install.ps1, install-tray.ps1, README, appsettings.example.json, VERSION.txt)
+          - **Linux (x64)**: `acetone-v2-linux-x64.tar.gz` (proxy, tray app, install.sh, install-tray.sh, acetone-tray.desktop, README, appsettings.example.json, VERSION.txt)
 
-          - **Windows (x64)**: `acetone-v2-win-x64.zip`
-          - **Linux (x64)**: `acetone-v2-linux-x64.tar.gz`
-
-          ### 🚀 Quick Start
-
-          **Windows:**
+          ### Install & Run (Windows)
           ```powershell
-          # Extract the zip file
           Expand-Archive acetone-v2-win-x64.zip -DestinationPath acetone-v2
           cd acetone-v2
-          # Run the proxy
-          .\Acetone.V2.Proxy.exe
+          .\install.ps1 -CreateService -StartService -InstallTrayApp
           ```
 
-          **Linux:**
+          ### Install & Run (Linux)
           ```bash
-          # Extract the tarball
           tar -xzf acetone-v2-linux-x64.tar.gz -C acetone-v2
           cd acetone-v2
-          # Make executable and run
-          chmod +x Acetone.V2.Proxy
-          ./Acetone.V2.Proxy
+          sudo ./install.sh --create-service --start-service --install-tray-app
           ```
 
-          ### 🐳 Docker
+          ### Manual Run (no service)
+          - Windows: `.\Acetone.V2.Proxy.exe`
+          - Linux: `./Acetone.V2.Proxy`
 
+          ### Docker
           ```bash
           docker pull ghcr.io/${{ github.repository }}/acetone-v2-proxy:${{ steps.version.outputs.tag }}
           docker run -p 8080:8080 -p 9090:9090 ghcr.io/${{ github.repository }}/acetone-v2-proxy:${{ steps.version.outputs.tag }}
