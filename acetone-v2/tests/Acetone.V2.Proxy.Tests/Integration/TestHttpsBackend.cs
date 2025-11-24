@@ -28,20 +28,11 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
 
     public static async Task<TestHttpsBackend> StartAsync(string? thumbprint)
     {
-        X509Certificate2 cert;
-        if (OperatingSystem.IsWindows())
-        {
-            if (string.IsNullOrWhiteSpace(thumbprint))
-            {
-                throw new ArgumentException("Thumbprint is required for Windows HTTPS backend", nameof(thumbprint));
-            }
-            cert = FindCertificate(thumbprint) ??
-                   throw new InvalidOperationException($"Certificate with thumbprint '{thumbprint}' not found in CurrentUser/My.");
-        }
-        else
-        {
-            cert = CreateSelfSignedLocalhostCertificate();
-        }
+        // Prefer a supplied certificate on Windows, but fall back to a self-signed localhost cert
+        // so CI can run without pre-provisioned certs.
+        X509Certificate2 cert = (OperatingSystem.IsWindows() && !string.IsNullOrWhiteSpace(thumbprint))
+            ? (FindCertificate(thumbprint) ?? CreateSelfSignedLocalhostCertificate())
+            : CreateSelfSignedLocalhostCertificate();
 
         int port = GetFreeTcpPort();
 
