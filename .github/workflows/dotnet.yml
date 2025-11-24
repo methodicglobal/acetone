@@ -157,14 +157,17 @@ jobs:
           name: ${{ env.ARTIFACT_NAME }}
           path: release
 
-      - name: Compute next integer tag (vN)
+      - name: Compute next semver tag (vX.Y.Z)
         id: nexttag
         shell: pwsh
         run: |
           git fetch --tags --force
-          $tags = (git tag --list "v*" | Where-Object { $_ -match '^v\d+$' }) | ForEach-Object { $_.Trim() }
-          if (-not $tags -or $tags.Count -eq 0) { $next = 1 } else { $max = ($tags | ForEach-Object { [int]($_ -replace '^v','') } | Measure-Object -Maximum).Maximum; $next = [int]$max + 1 }
-          "next=v$next" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          $latest = git tag --list "v*" | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Sort-Object { [version]($_ -replace '^v','') } | Select-Object -Last 1
+          if (-not $latest) { $latest = "v1.0.0" }
+
+          $ver = [version]($latest -replace '^v','')
+          $next = "v{0}.{1}.{2}" -f $ver.Major, $ver.Minor, ($ver.Build + 1)
+          "next=$next" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
