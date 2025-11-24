@@ -110,7 +110,7 @@ jobs:
 
     - name: Restore dependencies
       working-directory: acetone-v2
-      run: dotnet restore ${{ env.SOLUTION_PATH }}
+      run: dotnet restore Acetone.V2.sln
 
     - name: Publish ${{ matrix.rid }}
       working-directory: acetone-v2
