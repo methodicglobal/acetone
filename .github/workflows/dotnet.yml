@@ -32,8 +32,7 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 9.0.x
-          include-prerelease: true
+          dotnet-version: 10.0.x
 
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
@@ -55,6 +54,9 @@ jobs:
         run: dotnet build "$env:SOLUTION_FILE" -c $env:BUILD_CONFIGURATION --no-restore
 
       - name: Run unit tests
+        env:
+          ACETONE_SKIP_DEPLOY: '1'
+          ACETONE_SKIP_APP_TYPE_UNPROVISION: '1'
         shell: pwsh
         run: |
           $testResultsDir = Join-Path $env:RUNNER_TEMP "TestResults"
@@ -85,34 +87,33 @@ jobs:
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: pwsh
         run: |
-          $configRoot = Join-Path ".\Methodic.Acetone\bin" $env:BUILD_CONFIGURATION
-          if (-not (Test-Path $configRoot)) {
-            Write-Error "Expected build configuration path not found: $configRoot"
+          $binRoot = Join-Path ".\Methodic.Acetone" "bin"
+          if (-not (Test-Path $binRoot)) {
+            Write-Error "Expected build output root not found: $binRoot"
             exit 1
           }
 
-          $candidate = Get-ChildItem -Path $configRoot -Directory | Where-Object {
-            Test-Path (Join-Path $_.FullName "Methodic.Acetone.dll")
-          } | Select-Object -First 1
+          $dll = Get-ChildItem -Path $binRoot -Recurse -Filter "Methodic.Acetone.dll" |
+            Where-Object { $_.FullName -match [regex]::Escape($env:BUILD_CONFIGURATION) -and $_.FullName -match [regex]::Escape($env:PACKAGE_FRAMEWORK) } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
 
-          if ($candidate) {
-            $acetoneOutput = $candidate.FullName
-          }
-          elseif (Test-Path (Join-Path $configRoot "Methodic.Acetone.dll")) {
-            $acetoneOutput = $configRoot
-          }
-          else {
-            Write-Error "Expected Methodic.Acetone build output not found under $configRoot"
-            Get-ChildItem -Path $configRoot -Recurse -Filter "Methodic.Acetone.dll" | ForEach-Object { Write-Host "Found candidate: $($_.FullName)" }
+          if (-not $dll) {
+            Write-Error "Could not locate Methodic.Acetone.dll under $binRoot for configuration $env:BUILD_CONFIGURATION and framework $env:PACKAGE_FRAMEWORK"
+            Get-ChildItem -Path $binRoot -Recurse -Filter "Methodic.Acetone.dll" | ForEach-Object { Write-Host "Found candidate: $($_.FullName)" }
             exit 1
           }
+
+          $acetoneOutput = Split-Path $dll.FullName -Parent
+          Write-Host "Packing from $acetoneOutput"
 
           $out = Join-Path $env:RUNNER_TEMP $env:ARTIFACT_NAME
           New-Item -Force -ItemType Directory -Path $out | Out-Null
           Copy-Item -Recurse -Force "$acetoneOutput\*" $out
 
-          Compress-Archive -Path "$out\*" -DestinationPath "$env:ARTIFACT_ZIP" -Force
-          Write-Host "Created archive: $env:ARTIFACT_ZIP"
+          $archive = Join-Path $PWD $env:ARTIFACT_ZIP
+          Compress-Archive -Path "$out\*" -DestinationPath $archive -Force
+          Write-Host "Created archive: $archive"
 
       - name: Create NuGet package (.nuspec)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'

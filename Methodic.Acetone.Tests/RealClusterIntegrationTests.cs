@@ -17,6 +17,8 @@ namespace Methodic.Acetone.Tests
 		private static ServiceFabricTestClusterManager clusterManager;
 		private static readonly ILogger logger = new TraceLogger { Enabled = true };
 		private const string ClusterEndpoint = "localhost:19000";
+		private static bool skipDeployment;
+		private static bool usingMockData;
 		private static List<string> deployedApplications;
 
 		/// <summary>
@@ -26,12 +28,13 @@ namespace Methodic.Acetone.Tests
 		[ClassInitialize]
 		public static void ClassSetup(TestContext context)
 		{
+			skipDeployment = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_DEPLOY"), "1", StringComparison.OrdinalIgnoreCase);
+			usingMockData = false;
+
 			Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
 			Console.WriteLine("║  Real Cluster Integration Test Suite                         ║");
 			Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
 			Console.WriteLine();
-
-			bool skipDeployment = string.Equals(Environment.GetEnvironmentVariable("ACETONE_SKIP_DEPLOY"), "1", StringComparison.OrdinalIgnoreCase);
 
 			try
 			{
@@ -62,6 +65,7 @@ namespace Methodic.Acetone.Tests
 				{
 					Console.WriteLine("⚠ Deployment skipped due to ACETONE_SKIP_DEPLOY=1");
 					deployedApplications = new List<string>();
+					usingMockData = true;
 				}
 				else
 				{
@@ -69,6 +73,7 @@ namespace Methodic.Acetone.Tests
 					Console.WriteLine("ℹ Tests will use mock data for reliable execution");
 					Console.WriteLine();
 					deployedApplications = new List<string>();
+					usingMockData = true;
 				}
 			}
 			catch (Exception ex)
@@ -77,6 +82,7 @@ namespace Methodic.Acetone.Tests
 				Console.WriteLine("ℹ Tests will continue with mock data");
 				Console.WriteLine();
 				deployedApplications = new List<string>();
+				usingMockData = true;
 			}
 		}
 
@@ -118,14 +124,38 @@ namespace Methodic.Acetone.Tests
 			}
 		}
 
+		private static bool ShouldSkipClusterTests(bool requireDeployment, out string reason)
+		{
+			if (skipDeployment)
+			{
+				reason = "Cluster deployment skipped via ACETONE_SKIP_DEPLOY=1";
+				return true;
+			}
+
+			if (clusterManager == null || !clusterManager.IsClusterAvailable)
+			{
+				reason = "Cluster not available; using mock data";
+				return true;
+			}
+
+			if (requireDeployment && (usingMockData || deployedApplications == null || deployedApplications.Count == 0))
+			{
+				reason = "No applications deployed to cluster; using mock data";
+				return true;
+			}
+
+			reason = null;
+			return false;
+		}
+
 		[TestMethod]
 		[TestCategory("RealCluster")]
 		[TestCategory("Integration")]
 		public void VerifyClusterConnection()
 		{
-			if (!clusterManager.IsClusterAvailable)
+			if (ShouldSkipClusterTests(requireDeployment: false, out var reason))
 			{
-				Assert.Inconclusive("Cluster not available - test skipped");
+				Assert.Inconclusive(reason);
 				return;
 			}
 
@@ -138,9 +168,9 @@ namespace Methodic.Acetone.Tests
 		[TestCategory("Integration")]
 		public void VerifyApplicationsDeployed()
 		{
-			if (!clusterManager.IsClusterAvailable)
+			if (ShouldSkipClusterTests(requireDeployment: true, out var reason))
 			{
-				Assert.Inconclusive("Cluster not available - test skipped");
+				Assert.Inconclusive(reason);
 				return;
 			}
 
@@ -157,9 +187,9 @@ namespace Methodic.Acetone.Tests
 		[TestCategory("Integration")]
 		public async Task ResolveRealClusterEndpoints()
 		{
-			if (!clusterManager.IsClusterAvailable)
+			if (ShouldSkipClusterTests(requireDeployment: true, out var reason))
 			{
-				Assert.Inconclusive("Cluster not available - test skipped");
+				Assert.Inconclusive(reason);
 				return;
 			}
 
@@ -192,9 +222,9 @@ namespace Methodic.Acetone.Tests
 		[TestCategory("Integration")]
 		public async Task GetDeployedApplicationInfo()
 		{
-			if (!clusterManager.IsClusterAvailable)
+			if (ShouldSkipClusterTests(requireDeployment: true, out var reason))
 			{
-				Assert.Inconclusive("Cluster not available - test skipped");
+				Assert.Inconclusive(reason);
 				return;
 			}
 

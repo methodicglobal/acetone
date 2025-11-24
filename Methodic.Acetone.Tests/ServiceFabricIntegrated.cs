@@ -135,6 +135,12 @@ namespace Methodic.Acetone.Tests
 		[TestMethod]
 		public void EndpointResolutionSuccess()
 		{
+			if (!useRealCluster)
+			{
+				Assert.Inconclusive("Performance benchmark skipped when using mock resolver");
+				return;
+			}
+
 			if (servicesUnderTest == null || servicesUnderTest.Count == 0)
 			{
 				Assert.Inconclusive("No services available for resolution tests");
