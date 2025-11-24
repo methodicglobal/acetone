@@ -50,8 +50,7 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
         app.MapGet("/", () => Results.Ok("backend ok"));
 
         var runTask = app.RunAsync();
-        // Give Kestrel a moment to bind
-        await Task.Delay(200);
+        await WaitForBackendReadyAsync($"https://localhost:{port}/");
 
         return new TestHttpsBackend(app, runTask, port);
     }
@@ -100,6 +99,35 @@ internal sealed class TestHttpsBackend : IAsyncDisposable
 
         var cert = req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
         return cert;
+    }
+
+    private static async Task WaitForBackendReadyAsync(string baseUrl)
+    {
+        using var handler = new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback = (_, _, _, _) => true
+        };
+        using var client = new HttpClient(handler);
+
+        for (int attempt = 0; attempt < 15; attempt++)
+        {
+            try
+            {
+                var response = await client.GetAsync($"{baseUrl}weatherforecast");
+                if (response.IsSuccessStatusCode)
+                {
+                    return;
+                }
+            }
+            catch (HttpRequestException)
+            {
+                // Backend not ready yet; retry.
+            }
+
+            await Task.Delay(200);
+        }
+
+        throw new InvalidOperationException("HTTPS test backend failed to start within timeout.");
     }
 
     private static int GetFreeTcpPort()
