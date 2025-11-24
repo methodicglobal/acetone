@@ -179,7 +179,7 @@ jobs:
             - NuGet package
             - Unit test results (see artifacts)
           files: |
-            release/${{ env.ARTIFACT_ZIP }}
-            release/Methodic.Acetone.*.nupkg
+            release/**/${{ env.ARTIFACT_ZIP }}
+            release/**/Methodic.Acetone.*.nupkg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
